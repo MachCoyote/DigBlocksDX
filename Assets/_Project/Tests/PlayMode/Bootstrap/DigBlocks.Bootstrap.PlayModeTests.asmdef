@@ -1,0 +1,20 @@
+{
+  "name": "DigBlocks.Bootstrap.PlayModeTests",
+  "rootNamespace": "DigBlocks.Bootstrap.PlayModeTests",
+  "references": [
+    "DigBlocks.Bootstrap",
+    "DigBlocks.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

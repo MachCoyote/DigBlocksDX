@@ -1,0 +1,16 @@
+{
+  "name": "DigBlocks.Bootstrap",
+  "rootNamespace": "DigBlocks.Bootstrap",
+  "references": [
+    "DigBlocks.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
