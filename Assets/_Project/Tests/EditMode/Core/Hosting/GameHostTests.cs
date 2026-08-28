@@ -25,6 +25,29 @@ namespace DigBlocks.Core.Tests.Hosting
         }
 
         [Test]
+        public async Task StartAsync_WithPreCancelledToken_DoesNotStartServices()
+        {
+            var events = new List<string>();
+            var host = CreateHost(new RecordingGameService("unused", events));
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            OperationCanceledException actual = null;
+            try
+            {
+                await host.StartAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException exception)
+            {
+                actual = exception;
+            }
+
+            Assert.That(actual, Is.Not.Null);
+            Assert.That(events, Is.Empty);
+            Assert.That(host.State, Is.EqualTo(GameHostState.Faulted));
+        }
+
+        [Test]
         public void StartAsync_WhenServiceFails_RollsBackStartedServicesInReverseOrder()
         {
             var events = new List<string>();
@@ -53,11 +76,14 @@ namespace DigBlocks.Core.Tests.Hosting
         {
             var events = new List<string>();
             using var cancellation = new CancellationTokenSource();
-            cancellation.Cancel();
             var first = new RecordingGameService("first", events);
             var second = new RecordingGameService("second", events)
             {
-                StartBehavior = token => Task.FromCanceled(token)
+                StartBehavior = token =>
+                {
+                    cancellation.Cancel();
+                    return Task.FromCanceled(token);
+                }
             };
             var host = CreateHost(first, second);
 
@@ -122,6 +148,72 @@ namespace DigBlocks.Core.Tests.Hosting
 
             await host.StopAsync(CancellationToken.None);
 
+            Assert.That(events, Is.EqualTo(new[]
+            {
+                "start:first", "start:second", "stop:second", "stop:first"
+            }));
+            Assert.That(host.State, Is.EqualTo(GameHostState.Stopped));
+        }
+
+        [Test]
+        public async Task StopAsync_WhenLoggerThrows_StillStopsService()
+        {
+            var events = new List<string>();
+            var service = new RecordingGameService("service", events);
+            var logger = new ThrowingLogger(message => message.StartsWith("Stopping"));
+            var host = new GameHost(new[] { service }, logger);
+            await host.StartAsync(CancellationToken.None);
+
+            await host.StopAsync(CancellationToken.None);
+
+            Assert.That(events, Is.EqualTo(new[] { "start:service", "stop:service" }));
+            Assert.That(host.State, Is.EqualTo(GameHostState.Stopped));
+        }
+
+        [Test]
+        public void StartAsync_WhenRollbackLoggerThrows_StillRollsBackService()
+        {
+            var events = new List<string>();
+            var first = new RecordingGameService("first", events);
+            var second = new RecordingGameService("second", events)
+            {
+                StartBehavior = _ => Task.FromException(new InvalidOperationException("startup failed"))
+            };
+            var logger = new ThrowingLogger(message => message.StartsWith("Rolling back"));
+            var host = new GameHost(new IGameService[] { first, second }, logger);
+
+            Assert.ThrowsAsync<InvalidOperationException>(
+                () => host.StartAsync(CancellationToken.None));
+
+            Assert.That(events, Does.Contain("stop:first"));
+            Assert.That(host.State, Is.EqualTo(GameHostState.Faulted));
+        }
+
+        [Test]
+        public async Task StopAsync_WhenServiceObservesCancellation_PreservesCancellationAfterCleanup()
+        {
+            var events = new List<string>();
+            using var cancellation = new CancellationTokenSource();
+            var first = new RecordingGameService("first", events);
+            var second = new RecordingGameService("second", events)
+            {
+                StopBehavior = token => Task.FromCanceled(token)
+            };
+            var host = CreateHost(first, second);
+            host.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            cancellation.Cancel();
+
+            OperationCanceledException actual = null;
+            try
+            {
+                await host.StopAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException exception)
+            {
+                actual = exception;
+            }
+
+            Assert.That(actual, Is.Not.Null);
             Assert.That(events, Is.EqualTo(new[]
             {
                 "start:first", "start:second", "stop:second", "stop:first"

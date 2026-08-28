@@ -18,9 +18,13 @@ namespace DigBlocks.Bootstrap
         private CancellationTokenSource lifetimeCancellation;
         private GameHost host;
         private IGameLogger logger;
+        private GameHostState state = GameHostState.Created;
+        private Task shutdownTask;
         private Task startupTask;
+        private bool shutdownComplete;
+        private bool quitContinuationStarted;
 
-        public GameHostState HostState { get; private set; } = GameHostState.Created;
+        public GameHostState HostState => host?.State ?? state;
 
         public LaunchOptions LaunchOptions { get; private set; }
 
@@ -38,6 +42,7 @@ namespace DigBlocks.Bootstrap
             DontDestroyOnLoad(gameObject);
             lifetimeCancellation = new CancellationTokenSource();
             logger = new UnityGameLogger();
+            Application.wantsToQuit += WantsToQuit;
         }
 
         private void Start()
@@ -50,7 +55,7 @@ namespace DigBlocks.Bootstrap
 
         private void OnApplicationQuit()
         {
-            if (instance == this)
+            if (instance == this && !shutdownComplete)
             {
                 lifetimeCancellation.Cancel();
             }
@@ -58,12 +63,47 @@ namespace DigBlocks.Bootstrap
 
         private async void OnDestroy()
         {
+            Application.wantsToQuit -= WantsToQuit;
             if (instance != this)
             {
                 return;
             }
 
             instance = null;
+            await BeginShutdownAsync();
+        }
+
+        private bool WantsToQuit()
+        {
+            if (instance != this || shutdownComplete)
+            {
+                return true;
+            }
+
+            if (!quitContinuationStarted)
+            {
+                quitContinuationStarted = true;
+                _ = CompleteQuitAfterShutdownAsync();
+            }
+
+            return false;
+        }
+
+        private async Task CompleteQuitAfterShutdownAsync()
+        {
+            await BeginShutdownAsync();
+            await Task.Yield();
+            Application.Quit();
+        }
+
+        private Task BeginShutdownAsync()
+        {
+            shutdownTask ??= ShutdownHostAsync();
+            return shutdownTask;
+        }
+
+        private async Task ShutdownHostAsync()
+        {
             lifetimeCancellation.Cancel();
 
             try
@@ -76,22 +116,16 @@ namespace DigBlocks.Bootstrap
                 if (host != null)
                 {
                     await host.StopAsync(CancellationToken.None);
-                    HostState = host.State;
                 }
             }
             catch (Exception exception)
             {
-                if (LastFailure == null)
-                {
-                    LastFailure = exception;
-                }
-
+                LastFailure ??= exception;
                 logger.Log(GameLogLevel.Error, "DigBlocks shutdown failed.", exception);
             }
-            finally
-            {
-                lifetimeCancellation.Dispose();
-            }
+
+            lifetimeCancellation.Dispose();
+            shutdownComplete = true;
         }
 
         private async Task StartHostAsync()
@@ -105,15 +139,19 @@ namespace DigBlocks.Bootstrap
 
                 host = new GameHost(Array.Empty<IGameService>(), logger);
                 await host.StartAsync(lifetimeCancellation.Token);
-                HostState = host.State;
                 logger.Log(
                     GameLogLevel.Information,
                     $"DigBlocks started in {LaunchOptions.Mode} mode.");
             }
+            catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested)
+            {
+                state = host?.State ?? GameHostState.Faulted;
+                logger.Log(GameLogLevel.Information, "DigBlocks startup was cancelled during shutdown.");
+            }
             catch (Exception exception)
             {
                 LastFailure = exception;
-                HostState = host?.State ?? GameHostState.Faulted;
+                state = host?.State ?? GameHostState.Faulted;
                 logger.Log(GameLogLevel.Error, "DigBlocks startup failed.", exception);
             }
         }

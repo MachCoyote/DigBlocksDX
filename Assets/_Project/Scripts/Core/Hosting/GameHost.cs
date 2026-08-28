@@ -50,14 +50,17 @@ namespace DigBlocks.Core.Hosting
                 SetState(GameHostState.Starting);
                 try
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     for (int index = 0; index < services.Length; index++)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         IGameService service = services[index];
-                        logger.Log(GameLogLevel.Information, $"Starting game service '{service.Name}'.");
+                        SafeLog(GameLogLevel.Information, $"Starting game service '{service.Name}'.");
                         await service.StartAsync(cancellationToken);
                         startedServices.Add(service);
                     }
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     SetState(GameHostState.Running);
                 }
                 catch (Exception startupException)
@@ -106,13 +109,18 @@ namespace DigBlocks.Core.Hosting
 
                 SetState(GameHostState.Stopping);
                 var errors = new List<Exception>();
+                OperationCanceledException cancellationException = null;
                 for (int index = startedServices.Count - 1; index >= 0; index--)
                 {
                     IGameService service = startedServices[index];
+                    SafeLog(GameLogLevel.Information, $"Stopping game service '{service.Name}'.");
                     try
                     {
-                        logger.Log(GameLogLevel.Information, $"Stopping game service '{service.Name}'.");
                         await service.StopAsync(cancellationToken);
+                    }
+                    catch (OperationCanceledException exception)
+                    {
+                        cancellationException ??= exception;
                     }
                     catch (Exception exception)
                     {
@@ -125,7 +133,17 @@ namespace DigBlocks.Core.Hosting
 
                 if (errors.Count > 0)
                 {
+                    if (cancellationException != null)
+                    {
+                        errors.Insert(0, cancellationException);
+                    }
+
                     throw new AggregateException("One or more game services failed to stop.", errors);
+                }
+
+                if (cancellationException != null)
+                {
+                    throw cancellationException;
                 }
             }
             finally
@@ -142,9 +160,9 @@ namespace DigBlocks.Core.Hosting
             for (int index = startedServices.Count - 1; index >= 0; index--)
             {
                 IGameService service = startedServices[index];
+                SafeLog(GameLogLevel.Information, $"Rolling back game service '{service.Name}'.");
                 try
                 {
-                    logger.Log(GameLogLevel.Information, $"Rolling back game service '{service.Name}'.");
                     await service.StopAsync(CancellationToken.None);
                 }
                 catch (Exception exception)
@@ -158,6 +176,18 @@ namespace DigBlocks.Core.Hosting
             startedServices.Clear();
             startedServices.AddRange(retainedServices);
             return rollbackErrors;
+        }
+
+        private void SafeLog(GameLogLevel level, string message, Exception exception = null)
+        {
+            try
+            {
+                logger.Log(level, message, exception);
+            }
+            catch
+            {
+                // Diagnostics must never suppress application lifecycle work.
+            }
         }
 
         private void EnterLifecycleTransition()
