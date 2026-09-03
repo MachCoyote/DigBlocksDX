@@ -1,10 +1,9 @@
 {
-  "name": "DigBlocks.Bootstrap",
-  "rootNamespace": "DigBlocks.Bootstrap",
+  "name": "DigBlocks.Client",
+  "rootNamespace": "DigBlocks.Client",
   "references": [
-    "DigBlocks.Client",
     "DigBlocks.Core",
-    "DigBlocks.Server",
+    "DigBlocks.Networking",
     "UniTask"
   ],
   "includePlatforms": [],

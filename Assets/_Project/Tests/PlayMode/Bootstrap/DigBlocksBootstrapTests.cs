@@ -14,7 +14,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
     public sealed class DigBlocksBootstrapTests
     {
         [UnityTest]
-        public IEnumerator Bootstrap_StartsEmptyHostAndRejectsDuplicate()
+        public IEnumerator Bootstrap_StartsHostAndRejectsDuplicate()
         {
             var ownerObject = new GameObject("Bootstrap Owner");
             DigBlocksBootstrap owner = ownerObject.AddComponent<DigBlocksBootstrap>();

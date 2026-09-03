@@ -1,5 +1,4 @@
 using Cysharp.Threading.Tasks;
-using DigBlocks.Bootstrap.Diagnostics;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Launch;
 using System;
@@ -138,31 +137,6 @@ namespace DigBlocks.Bootstrap
             shutdownComplete = true;
         }
 
-        private IGameService[] CreateServices(LaunchOptions launchOptions)
-        {
-            var services = new List<IGameService>
-            {
-                new DiagnosticService(logger)
-            };
-
-            switch (launchOptions.Mode)
-            {
-                case LaunchMode.SinglePlayer:
-                    // Add local server, NGO host, and local client services.
-                    break;
-
-                case LaunchMode.RemoteClient:
-                    // Add NGO client and client runtime services.
-                    break;
-
-                case LaunchMode.DedicatedServer:
-                    // Add authoritative server and NGO server services.
-                    break;
-            }
-
-            return services.ToArray();
-        }
-
         private async UniTask StartHostAsync()
         {
             try
@@ -173,7 +147,7 @@ namespace DigBlocks.Bootstrap
                     IsServerBuild());
 
 
-                IGameService[] services = CreateServices(LaunchOptions);
+                IReadOnlyList<IGameService> services = GameServiceComposer.Compose(LaunchOptions, logger);
                 host = new GameHost(services, logger);
 
 
