@@ -832,24 +832,24 @@ PlayerSettings:
   webEnableSubmoduleStrippingCompatibility: 0
   webProgressiveAssetLoading: 0
   scriptingDefineSymbols:
-    Android: 
-    EmbeddedLinux: 
-    GameCoreScarlett: 
-    GameCoreXboxOne: 
-    Kepler: 
-    LinuxHeadlessSimulation: 
-    Nintendo Switch: 
-    Nintendo Switch 2: 
-    PS4: 
-    PS5: 
-    QNX: 
-    Standalone: 
-    VisionOS: 
-    WebGL: 
-    Windows Store Apps: 
-    XboxOne: 
-    iPhone: 
-    tvOS: 
+    Android: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    EmbeddedLinux: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    GameCoreScarlett: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    GameCoreXboxOne: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    Kepler: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    LinuxHeadlessSimulation: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    Nintendo Switch: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    Nintendo Switch 2: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    PS4: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    PS5: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    QNX: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    Standalone: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    VisionOS: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    WebGL: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    Windows Store Apps: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    XboxOne: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    iPhone: DOTWEEN;DOTWEEN_TEXTMESHPRO
+    tvOS: DOTWEEN;DOTWEEN_TEXTMESHPRO
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

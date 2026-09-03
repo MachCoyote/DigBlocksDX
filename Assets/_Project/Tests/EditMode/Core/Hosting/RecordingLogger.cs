@@ -8,7 +8,12 @@ namespace DigBlocks.Core.Tests.Hosting
     {
         public List<Entry> Entries { get; } = new List<Entry>();
 
-        public void Log(GameLogLevel level, string message, Exception exception = null)
+        public IGameLogger CreateFor(string sourceName)
+        {
+            return new ScopedGameLogger(this, sourceName);
+        }
+
+        public void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null)
         {
             Entries.Add(new Entry(level, message, exception));
         }

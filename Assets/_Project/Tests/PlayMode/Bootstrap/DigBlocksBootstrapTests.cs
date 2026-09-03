@@ -1,4 +1,8 @@
 using System.Collections;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using DigBlocks.Bootstrap.Diagnostics;
 using DigBlocks.Core.Hosting;
 using NUnit.Framework;
 using UnityEngine;
@@ -19,14 +23,13 @@ namespace DigBlocks.Bootstrap.PlayModeTests
 
             yield return null;
 
-            DigBlocksBootstrap[] bootstraps = Object.FindObjectsByType<DigBlocksBootstrap>(
-                FindObjectsSortMode.None);
+            DigBlocksBootstrap[] bootstraps = UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>();
             Assert.That(bootstraps, Has.Length.EqualTo(1));
             Assert.That(bootstraps[0], Is.SameAs(owner));
             Assert.That(owner.HostState, Is.EqualTo(GameHostState.Running));
             Assert.That(owner.LastFailure, Is.Null);
 
-            Object.Destroy(ownerObject);
+            UnityEngine.Object.Destroy(ownerObject);
             yield return null;
         }
 
@@ -36,11 +39,36 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             SceneManager.LoadScene("SampleScene", LoadSceneMode.Single);
             yield return null;
 
-            DigBlocksBootstrap[] bootstraps = Object.FindObjectsByType<DigBlocksBootstrap>(
-                FindObjectsSortMode.None);
+            DigBlocksBootstrap[] bootstraps = UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>();
             Assert.That(bootstraps, Has.Length.EqualTo(1));
             Assert.That(bootstraps[0].HostState, Is.EqualTo(GameHostState.Running));
             Assert.That(bootstraps[0].LastFailure, Is.Null);
+        }
+
+        [Test]
+        public void DiagnosticService_StartAsync_LogsItsNameAsTheSource()
+        {
+            var logger = new CapturingLogger();
+            var service = new DiagnosticService(logger);
+
+            service.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+            Assert.That(logger.Messages, Is.EqualTo(new[] { "[DiagnosticService] Started." }));
+        }
+
+        private sealed class CapturingLogger : IGameLogger
+        {
+            public List<string> Messages { get; } = new List<string>();
+
+            public IGameLogger CreateFor(string sourceName)
+            {
+                return new ScopedGameLogger(this, sourceName);
+            }
+
+            public void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null)
+            {
+                Messages.Add(message);
+            }
         }
     }
 }

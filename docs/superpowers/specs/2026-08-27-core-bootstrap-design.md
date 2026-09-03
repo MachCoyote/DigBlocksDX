@@ -69,10 +69,10 @@ Later assemblies described in the broader architecture are not created until the
 An application service exposes:
 
 - A diagnostic name.
-- `StartAsync(CancellationToken)`, returning a `Task`.
-- `StopAsync(CancellationToken)`, returning a `Task`.
+- `StartAsync(CancellationToken)`, returning a `UniTask`.
+- `StopAsync(CancellationToken)`, returning a `UniTask`.
 
-Startup and shutdown occur infrequently, so `Task` is preferred over adding a third-party async dependency to Core. Service dependencies are supplied through constructors when the composition root creates each service.
+Startup and shutdown use the project's existing UniTask dependency. Service dependencies are supplied through constructors when the composition root creates each service.
 
 ### `IGameLogger`
 

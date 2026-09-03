@@ -2,7 +2,8 @@
   "name": "DigBlocks.Core.Tests",
   "rootNamespace": "DigBlocks.Core.Tests",
   "references": [
-    "DigBlocks.Core"
+    "DigBlocks.Core",
+    "UniTask"
   ],
   "includePlatforms": [
     "Editor"

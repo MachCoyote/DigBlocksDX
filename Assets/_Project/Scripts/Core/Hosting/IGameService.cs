@@ -1,5 +1,5 @@
 using System.Threading;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 
 namespace DigBlocks.Core.Hosting
 {
@@ -7,8 +7,8 @@ namespace DigBlocks.Core.Hosting
     {
         string Name { get; }
 
-        Task StartAsync(CancellationToken cancellationToken);
+        UniTask StartAsync(CancellationToken cancellationToken);
 
-        Task StopAsync(CancellationToken cancellationToken);
+        UniTask StopAsync(CancellationToken cancellationToken);
     }
 }

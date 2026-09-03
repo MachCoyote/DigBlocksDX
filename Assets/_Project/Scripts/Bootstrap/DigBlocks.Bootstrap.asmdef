@@ -2,7 +2,8 @@
   "name": "DigBlocks.Bootstrap",
   "rootNamespace": "DigBlocks.Bootstrap",
   "references": [
-    "DigBlocks.Core"
+    "DigBlocks.Core",
+    "UniTask"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using DigBlocks.Core.Hosting;
 
 namespace DigBlocks.Core.Tests.Hosting
@@ -18,20 +18,20 @@ namespace DigBlocks.Core.Tests.Hosting
 
         public string Name { get; }
 
-        public Func<CancellationToken, Task> StartBehavior { get; set; }
+        public Func<CancellationToken, UniTask> StartBehavior { get; set; }
 
-        public Func<CancellationToken, Task> StopBehavior { get; set; }
+        public Func<CancellationToken, UniTask> StopBehavior { get; set; }
 
-        public Task StartAsync(CancellationToken cancellationToken)
+        public UniTask StartAsync(CancellationToken cancellationToken)
         {
             events.Add($"start:{Name}");
-            return StartBehavior?.Invoke(cancellationToken) ?? Task.CompletedTask;
+            return StartBehavior?.Invoke(cancellationToken) ?? UniTask.CompletedTask;
         }
 
-        public Task StopAsync(CancellationToken cancellationToken)
+        public UniTask StopAsync(CancellationToken cancellationToken)
         {
             events.Add($"stop:{Name}");
-            return StopBehavior?.Invoke(cancellationToken) ?? Task.CompletedTask;
+            return StopBehavior?.Invoke(cancellationToken) ?? UniTask.CompletedTask;
         }
     }
 }

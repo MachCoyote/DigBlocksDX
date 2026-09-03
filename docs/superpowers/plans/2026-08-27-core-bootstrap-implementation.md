@@ -6,14 +6,14 @@
 
 **Architecture:** `DigBlocks.Core` contains framework-neutral launch and hosting code. `DigBlocks.Bootstrap` is the Unity-facing composition root and logger adapter. EditMode tests exercise Core without Play Mode; the sample scene supplies the one persistent bootstrap object.
 
-**Tech Stack:** Unity 6000.3.17f1, C#, .NET `Task`/`CancellationToken`, Unity Test Framework 1.6.0, NUnit, Unity assembly definitions.
+**Tech Stack:** Unity 6000.3.17f1, C#, UniTask/`CancellationToken`, Unity Test Framework 1.6.0, NUnit, Unity assembly definitions.
 
 **Spec:** `docs/superpowers/specs/2026-08-27-core-bootstrap-design.md`
 
 ## Global Constraints
 
 - Implement only Core/bootstrap lifecycle; do not add NGO, client/server runtimes, voxel storage, generation, saving, or rendering.
-- `DigBlocks.Core` must not reference `UnityEngine` or third-party async libraries.
+- `DigBlocks.Core` references the project's UniTask assembly for asynchronous lifecycle APIs.
 - Construct dependencies explicitly; do not add a service locator or reflection-based discovery.
 - `GameHost` is single-use: it cannot restart after stop or failure.
 - Start services sequentially in registration order and stop them in reverse order.
@@ -193,18 +193,18 @@ git commit -m "feat: add launch mode resolution"
 
 **Interfaces:**
 - Produces: `IGameService.StartAsync/StopAsync`, `IGameLogger.Log`, `GameHost.StartAsync`, `GameHost.State`, and rollback error reporting.
-- Consumes: launch-independent .NET `Task`, `CancellationToken`, collections, and exceptions.
+- Consumes: UniTask, `CancellationToken`, collections, and exceptions.
 
 - [ ] **Step 1: Write service test doubles**
 
 `RecordingGameService` accepts a name and shared `List<string> events`. It records `start:<name>` and `stop:<name>`. It exposes optional delegates:
 
 ```csharp
-public Func<CancellationToken, Task> StartBehavior { get; set; }
-public Func<CancellationToken, Task> StopBehavior { get; set; }
+public Func<CancellationToken, UniTask> StartBehavior { get; set; }
+public Func<CancellationToken, UniTask> StopBehavior { get; set; }
 ```
 
-When a delegate is null, return `Task.CompletedTask`.
+When a delegate is null, return `UniTask.CompletedTask`.
 
 `RecordingLogger` records `(GameLogLevel Level, string Message, Exception Exception)` entries without writing to Unity output.
 
@@ -237,7 +237,7 @@ public void StartAsync_WhenServiceFails_RollsBackStartedServicesInReverseOrder()
 [Test]
 public void StartAsync_WhenCancelled_RollsBackAndPreservesCancellation()
 {
-    // second service returns Task.FromCanceled using the received token.
+    // second service returns UniTask.FromCanceled using the received token.
     // Assert first stops and OperationCanceledException is observed.
 }
 
@@ -262,8 +262,8 @@ Use these signatures:
 public interface IGameService
 {
     string Name { get; }
-    Task StartAsync(CancellationToken cancellationToken);
-    Task StopAsync(CancellationToken cancellationToken);
+    UniTask StartAsync(CancellationToken cancellationToken);
+    UniTask StopAsync(CancellationToken cancellationToken);
 }
 
 public interface IGameLogger

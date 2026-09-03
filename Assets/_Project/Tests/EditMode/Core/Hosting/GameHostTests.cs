@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using DigBlocks.Core.Hosting;
 using NUnit.Framework;
 
@@ -10,6 +11,17 @@ namespace DigBlocks.Core.Tests.Hosting
 {
     public sealed class GameHostTests
     {
+        [Test]
+        public void GameServiceLifecycleMethods_ReturnUniTask()
+        {
+            Assert.That(
+                typeof(IGameService).GetMethod(nameof(IGameService.StartAsync)).ReturnType,
+                Is.EqualTo(typeof(UniTask)));
+            Assert.That(
+                typeof(IGameService).GetMethod(nameof(IGameService.StopAsync)).ReturnType,
+                Is.EqualTo(typeof(UniTask)));
+        }
+
         [Test]
         public async Task StartAsync_StartsServicesInRegistrationOrder()
         {
@@ -56,12 +68,12 @@ namespace DigBlocks.Core.Tests.Hosting
             var second = new RecordingGameService("second", events);
             var third = new RecordingGameService("third", events)
             {
-                StartBehavior = _ => Task.FromException(expected)
+                StartBehavior = _ => UniTask.FromException(expected)
             };
             var host = CreateHost(first, second, third);
 
             InvalidOperationException actual = Assert.ThrowsAsync<InvalidOperationException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
 
             Assert.That(actual, Is.SameAs(expected));
             Assert.That(events, Is.EqualTo(new[]
@@ -82,7 +94,7 @@ namespace DigBlocks.Core.Tests.Hosting
                 StartBehavior = token =>
                 {
                     cancellation.Cancel();
-                    return Task.FromCanceled(token);
+                    return UniTask.FromCanceled(token);
                 }
             };
             var host = CreateHost(first, second);
@@ -110,16 +122,16 @@ namespace DigBlocks.Core.Tests.Hosting
             var rollbackFailure = new InvalidOperationException("rollback failed");
             var first = new RecordingGameService("first", events)
             {
-                StopBehavior = _ => Task.FromException(rollbackFailure)
+                StopBehavior = _ => UniTask.FromException(rollbackFailure)
             };
             var second = new RecordingGameService("second", events)
             {
-                StartBehavior = _ => Task.FromException(startupFailure)
+                StartBehavior = _ => UniTask.FromException(startupFailure)
             };
             var host = CreateHost(first, second);
 
             GameHostStartException actual = Assert.ThrowsAsync<GameHostStartException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
 
             Assert.That(actual.InnerException, Is.SameAs(startupFailure));
             Assert.That(actual.RollbackErrors, Is.EqualTo(new[] { rollbackFailure }));
@@ -160,7 +172,7 @@ namespace DigBlocks.Core.Tests.Hosting
         {
             var events = new List<string>();
             var service = new RecordingGameService("service", events);
-            var logger = new ThrowingLogger(message => message.StartsWith("Stopping"));
+            var logger = new ThrowingLogger(message => message.Contains("Stopping"));
             var host = new GameHost(new[] { service }, logger);
             await host.StartAsync(CancellationToken.None);
 
@@ -171,19 +183,33 @@ namespace DigBlocks.Core.Tests.Hosting
         }
 
         [Test]
+        public async Task StartAsync_LogsTheAffectedServiceNameAsTheSource()
+        {
+            var events = new List<string>();
+            var service = new RecordingGameService("example-service", events);
+            var logger = new RecordingLogger();
+            var host = new GameHost(new[] { service }, logger);
+
+            await host.StartAsync(CancellationToken.None);
+
+            Assert.That(logger.Entries, Has.Count.EqualTo(1));
+            Assert.That(logger.Entries[0].Message, Is.EqualTo("[example-service] Starting."));
+        }
+
+        [Test]
         public void StartAsync_WhenRollbackLoggerThrows_StillRollsBackService()
         {
             var events = new List<string>();
             var first = new RecordingGameService("first", events);
             var second = new RecordingGameService("second", events)
             {
-                StartBehavior = _ => Task.FromException(new InvalidOperationException("startup failed"))
+                StartBehavior = _ => UniTask.FromException(new InvalidOperationException("startup failed"))
             };
-            var logger = new ThrowingLogger(message => message.StartsWith("Rolling back"));
+            var logger = new ThrowingLogger(message => message.Contains("Rolling back"));
             var host = new GameHost(new IGameService[] { first, second }, logger);
 
             Assert.ThrowsAsync<InvalidOperationException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
 
             Assert.That(events, Does.Contain("stop:first"));
             Assert.That(host.State, Is.EqualTo(GameHostState.Faulted));
@@ -197,7 +223,7 @@ namespace DigBlocks.Core.Tests.Hosting
             var first = new RecordingGameService("first", events);
             var second = new RecordingGameService("second", events)
             {
-                StopBehavior = token => Task.FromCanceled(token)
+                StopBehavior = token => UniTask.FromCanceled(token)
             };
             var host = CreateHost(first, second);
             host.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
@@ -254,17 +280,17 @@ namespace DigBlocks.Core.Tests.Hosting
             var secondFailure = new InvalidOperationException("second failed");
             var first = new RecordingGameService("first", events)
             {
-                StopBehavior = _ => Task.FromException(firstFailure)
+                StopBehavior = _ => UniTask.FromException(firstFailure)
             };
             var second = new RecordingGameService("second", events)
             {
-                StopBehavior = _ => Task.FromException(secondFailure)
+                StopBehavior = _ => UniTask.FromException(secondFailure)
             };
             var host = CreateHost(first, second);
             host.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
 
             AggregateException actual = Assert.ThrowsAsync<AggregateException>(
-                () => host.StopAsync(CancellationToken.None));
+                () => host.StopAsync(CancellationToken.None).AsTask());
 
             Assert.That(actual.InnerExceptions, Is.EqualTo(new[] { secondFailure, firstFailure }));
             Assert.That(events, Is.EqualTo(new[]
@@ -281,28 +307,27 @@ namespace DigBlocks.Core.Tests.Hosting
             await host.StopAsync(CancellationToken.None);
 
             Assert.ThrowsAsync<InvalidOperationException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
         }
 
         [Test]
         public async Task LifecycleCalls_WhileStartupIsActive_AreRejected()
         {
             var events = new List<string>();
-            var releaseStartup = new TaskCompletionSource<bool>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseStartup = new UniTaskCompletionSource<bool>();
             var service = new RecordingGameService("blocking", events)
             {
                 StartBehavior = _ => releaseStartup.Task
             };
             var host = CreateHost(service);
-            Task startup = host.StartAsync(CancellationToken.None);
+            UniTask startup = host.StartAsync(CancellationToken.None);
 
             Assert.ThrowsAsync<InvalidOperationException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
             Assert.ThrowsAsync<InvalidOperationException>(
-                () => host.StopAsync(CancellationToken.None));
+                () => host.StopAsync(CancellationToken.None).AsTask());
 
-            releaseStartup.SetResult(true);
+            releaseStartup.TrySetResult(true);
             await startup;
             Assert.That(host.State, Is.EqualTo(GameHostState.Running));
         }
@@ -315,16 +340,16 @@ namespace DigBlocks.Core.Tests.Hosting
             var first = new RecordingGameService("first", events)
             {
                 StopBehavior = _ => ++stopAttempts == 1
-                    ? Task.FromException(new InvalidOperationException("first rollback failed"))
-                    : Task.CompletedTask
+                    ? UniTask.FromException(new InvalidOperationException("first rollback failed"))
+                    : UniTask.CompletedTask
             };
             var second = new RecordingGameService("second", events)
             {
-                StartBehavior = _ => Task.FromException(new InvalidOperationException("startup failed"))
+                StartBehavior = _ => UniTask.FromException(new InvalidOperationException("startup failed"))
             };
             var host = CreateHost(first, second);
             Assert.ThrowsAsync<GameHostStartException>(
-                () => host.StartAsync(CancellationToken.None));
+                () => host.StartAsync(CancellationToken.None).AsTask());
 
             await host.StopAsync(CancellationToken.None);
 

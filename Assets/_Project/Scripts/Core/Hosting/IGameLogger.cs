@@ -4,6 +4,8 @@ namespace DigBlocks.Core.Hosting
 {
     public interface IGameLogger
     {
-        void Log(GameLogLevel level, string message, Exception exception = null);
+        IGameLogger CreateFor(string sourceName);
+
+        void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null);
     }
 }

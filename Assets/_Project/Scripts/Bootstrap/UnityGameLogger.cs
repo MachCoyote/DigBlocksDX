@@ -6,7 +6,12 @@ namespace DigBlocks.Bootstrap
 {
     public sealed class UnityGameLogger : IGameLogger
     {
-        public void Log(GameLogLevel level, string message, Exception exception = null)
+        public IGameLogger CreateFor(string sourceName)
+        {
+            return new ScopedGameLogger(this, sourceName);
+        }
+
+        public void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null)
         {
             switch (level)
             {

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 
 namespace DigBlocks.Core.Hosting
 {
@@ -37,7 +37,7 @@ namespace DigBlocks.Core.Hosting
 
         public GameHostState State => (GameHostState)Volatile.Read(ref state);
 
-        public async Task StartAsync(CancellationToken cancellationToken)
+        public async UniTask StartAsync(CancellationToken cancellationToken)
         {
             EnterLifecycleTransition();
             try
@@ -55,7 +55,7 @@ namespace DigBlocks.Core.Hosting
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         IGameService service = services[index];
-                        SafeLog(GameLogLevel.Information, $"Starting game service '{service.Name}'.");
+                        SafeLog(service, GameLogLevel.Information, "Starting.");
                         await service.StartAsync(cancellationToken);
                         startedServices.Add(service);
                     }
@@ -85,7 +85,7 @@ namespace DigBlocks.Core.Hosting
             }
         }
 
-        public async Task StopAsync(CancellationToken cancellationToken)
+        public async UniTask StopAsync(CancellationToken cancellationToken)
         {
             EnterLifecycleTransition();
             try
@@ -113,7 +113,7 @@ namespace DigBlocks.Core.Hosting
                 for (int index = startedServices.Count - 1; index >= 0; index--)
                 {
                     IGameService service = startedServices[index];
-                    SafeLog(GameLogLevel.Information, $"Stopping game service '{service.Name}'.");
+                    SafeLog(service, GameLogLevel.Information, "Stopping.");
                     try
                     {
                         await service.StopAsync(cancellationToken);
@@ -152,7 +152,7 @@ namespace DigBlocks.Core.Hosting
             }
         }
 
-        private async Task<List<Exception>> RollBackStartupAsync()
+        private async UniTask<List<Exception>> RollBackStartupAsync()
         {
             var rollbackErrors = new List<Exception>();
             var retainedServices = new List<IGameService>();
@@ -160,7 +160,7 @@ namespace DigBlocks.Core.Hosting
             for (int index = startedServices.Count - 1; index >= 0; index--)
             {
                 IGameService service = startedServices[index];
-                SafeLog(GameLogLevel.Information, $"Rolling back game service '{service.Name}'.");
+                SafeLog(service, GameLogLevel.Information, "Rolling back.");
                 try
                 {
                     await service.StopAsync(CancellationToken.None);
@@ -178,11 +178,11 @@ namespace DigBlocks.Core.Hosting
             return rollbackErrors;
         }
 
-        private void SafeLog(GameLogLevel level, string message, Exception exception = null)
+        private void SafeLog(IGameService service, GameLogLevel level, string message, Exception exception = null)
         {
             try
             {
-                logger.Log(level, message, exception);
+                logger.CreateFor(service.Name).Log(message, level, exception);
             }
             catch
             {
