@@ -1,10 +1,13 @@
 {
-  "name": "DigBlocks.Networking.Ngo",
-  "rootNamespace": "DigBlocks.Networking.Ngo",
+  "name": "DigBlocks.Networking.NetCode",
+  "rootNamespace": "DigBlocks.Networking.NetCode",
   "references": [
     "DigBlocks.Core",
     "DigBlocks.Networking",
-    "UniTask"
+    "UniTask",
+    "Unity.Entities",
+    "Unity.NetCode",
+    "Unity.Networking.Transport"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

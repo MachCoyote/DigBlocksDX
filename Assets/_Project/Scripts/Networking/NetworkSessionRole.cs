@@ -4,6 +4,6 @@ namespace DigBlocks.Networking
     {
         Client,
         Server,
-        Host
+        ClientAndServer
     }
 }

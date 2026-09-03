@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Implement only Core/bootstrap lifecycle; do not add NGO, client/server runtimes, voxel storage, generation, saving, or rendering.
+- Implement only Core/bootstrap lifecycle; do not add Netcode for Entities, client/server runtimes, voxel storage, generation, saving, or rendering.
 - `DigBlocks.Core` references the project's UniTask assembly for asynchronous lifecycle APIs.
 - Construct dependencies explicitly; do not add a service locator or reflection-based discovery.
 - `GameHost` is single-use: it cannot restart after stop or failure.
@@ -448,6 +448,6 @@ After verification, document for the user:
 
 1. How `DigBlocksBootstrap` selects a launch mode.
 2. How to create a future service by implementing `IGameService`.
-3. Where Milestone 2 will register `ServerRuntime`, `ClientRuntime`, and NGO adapters.
+3. Where Milestone 2 will register `ServerRuntime`, `ClientRuntime`, and Netcode for Entities adapters.
 4. Which Core invariants must remain unchanged: explicit ownership, ordered lifecycle, no UnityEngine dependency, no service locator.
 5. The recommended next exercise: add one harmless diagnostic service in a test before adding networking.

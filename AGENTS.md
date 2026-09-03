@@ -3,6 +3,28 @@
 DigBlocks is a Unity 6.6-based voxel game that aims to mimic and expand upon
 early-release-era Minecraft. Development direction is primarily user-led.
 
+## Architecture direction
+
+- Use Unity Entities/ECS as the primary runtime model for gameplay simulation.
+- Use Netcode for Entities as the sole networking framework. Do not introduce
+  Netcode for GameObjects or `NetworkObject`-based replication.
+- Keep the server authoritative. Ordinary mobs are interpolated ghosts; reserve
+  prediction and rollback for locally controlled or otherwise latency-sensitive
+  entities.
+- Run separate client and server ECS worlds in the same process for
+  single-player. Dedicated servers run only the authoritative server world.
+- Keep Core lifecycle code, voxel storage, save formats, and protocol contracts
+  independent of `Unity.NetCode` wherever practical. Package-specific network
+  integration belongs in `DigBlocks.Networking.NetCode`.
+- Use entities and ghosts for dynamic objects such as players, mobs, dropped
+  items, and projectiles. Do not create one entity or ghost per voxel block.
+- Store voxel data in coarse three-dimensional chunks using unmanaged,
+  job-friendly containers. Transmit chunk snapshots and deltas through a
+  dedicated bulk-data protocol rather than ordinary per-block ghost replication.
+- Prefer unmanaged components, Burst-compatible systems, jobs, blob assets, and
+  baking for hot simulation paths and runtime content data. Keep GameObjects for
+  bootstrapping, authoring, UI, and presentation where they are the better fit.
+
 ## Scope and autonomy
 
 - Treat architectural discussions, implementation guidance, and research as

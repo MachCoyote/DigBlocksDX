@@ -1,12 +1,15 @@
 # DigBlocks Core Bootstrap Design
 
+> This document records the original Core/bootstrap milestone. The current
+> project-wide direction is maintained in [architecture.md](../../architecture.md).
+
 ## Status
 
 Approved in conversation for implementation as the first project milestone.
 
 ## Scope
 
-This milestone establishes only the application bootstrap and service lifecycle used by later client and server systems. It does not install or integrate Netcode for GameObjects, create client/server simulation runtimes, store voxel sections, generate terrain, transmit world data, or render meshes.
+This milestone establishes only the application bootstrap and service lifecycle used by later client and server systems. It does not integrate a networking framework, create client/server simulation runtimes, store voxel sections, generate terrain, transmit world data, or render meshes.
 
 The result is a small, tested foundation that later milestones can extend without changing how the application starts and stops.
 
@@ -207,6 +210,10 @@ The milestone is complete when:
 - Entering and exiting Play Mode leaves no running host or undisposed cancellation source.
 - No client, server, networking, voxel, or rendering implementation has leaked into Core.
 
-## Extension Point for Milestone 2
+## Architecture Evolution After Milestone 1
 
-Milestone 2 will add `DigBlocks.Client`, `DigBlocks.Server`, `DigBlocks.Networking`, and `DigBlocks.Networking.Ngo`. Bootstrap will construct the appropriate services based on `LaunchMode` and register them with `GameHost`. The Core lifecycle contracts and launch resolution should not require redesign.
+The next scaffold added `DigBlocks.Client`, `DigBlocks.Server`,
+`DigBlocks.Networking`, and `DigBlocks.Networking.NetCode`. Netcode for Entities
+now supplies the client/server networking model, while Bootstrap continues to
+construct services based on `LaunchMode`. The Core lifecycle contracts and
+launch resolution remain independent of ECS and networking packages.

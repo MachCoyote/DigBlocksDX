@@ -11,6 +11,8 @@ Use the Superpowers framework selectively in this repository.
   requests do not authorize broad implementation work.
 
 The canonical agent instructions are in [AGENTS.md](../../AGENTS.md).
+The current game and networking direction is documented in
+[architecture.md](../architecture.md).
 
 ## Unity tooling
 
