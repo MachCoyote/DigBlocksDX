@@ -1,0 +1,15 @@
+{
+  "name": "DigBlocks.Voxels.Tests",
+  "references": [
+    "DigBlocks.Voxels",
+    "Unity.Collections",
+    "Unity.Mathematics",
+    "Unity.Burst"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
