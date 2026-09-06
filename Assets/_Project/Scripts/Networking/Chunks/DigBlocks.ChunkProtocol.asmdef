@@ -1,0 +1,6 @@
+{
+  "name": "DigBlocks.ChunkProtocol",
+  "rootNamespace": "DigBlocks.ChunkProtocol",
+  "references": ["DigBlocks.Voxels", "Unity.Mathematics"],
+  "noEngineReferences": false
+}

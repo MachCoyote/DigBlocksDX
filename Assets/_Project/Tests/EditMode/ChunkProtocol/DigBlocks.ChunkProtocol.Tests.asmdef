@@ -1,0 +1,7 @@
+{
+  "name": "DigBlocks.ChunkProtocol.Tests",
+  "rootNamespace": "DigBlocks.ChunkProtocol.Tests",
+  "references": ["DigBlocks.ChunkProtocol", "DigBlocks.Voxels", "Unity.Mathematics"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

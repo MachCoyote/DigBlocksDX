@@ -74,6 +74,17 @@ structural changes in high-volume simulation.
 
 ## Voxel World Model
 
+The approved [chunk data design](chunk-data-architecture.md) records the 32-cube,
+paletted-channel and independent-fluid direction. The companion
+[chunk networking design](chunk-networking-design.md) now uses the approved
+independent Unity Transport companion connection. Storage, registry, codecs,
+carrier, and bounded transfer components are implemented; world residency and
+session streaming integration remain pending. See the
+[implementation progress](chunk-implementation-progress.md) and
+[transfer protocol](chunk-transfer-protocol.md) for current contracts and evidence.
+The [meshing readiness guide](chunk-meshing-readiness.md) describes the remaining
+foundation work and the decisions to settle before visualization.
+
 Voxel blocks are not individual ECS entities or ghosts. World data is stored in
 coarse three-dimensional chunks so vertical terrain, underground regions, and
 multiple world layers do not require a fixed-height column model.

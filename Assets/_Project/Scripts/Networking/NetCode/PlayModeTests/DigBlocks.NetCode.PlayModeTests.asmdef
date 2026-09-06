@@ -1,0 +1,21 @@
+{
+	"name": "DigBlocks.NetCode.PlayModeTests",
+  "references": [
+    "DigBlocks.Client",
+    "DigBlocks.Core",
+    "DigBlocks.Server",
+    "DigBlocks.Networking",
+    "DigBlocks.Networking.NetCode",
+    "DigBlocks.Voxels",
+    "DigBlocks.ChunkProtocol",
+    "Unity.Mathematics",
+    "UniTask",
+    "Unity.Entities",
+    "Unity.NetCode",
+    "Unity.Collections",
+    "Unity.Networking.Transport"
+  ],
+  "optionalUnityReferences": [
+  "TestAssemblies"
+    ]
+}

@@ -23,13 +23,78 @@ The registry commit includes its existing tests and the minimal Unity assembly
 and asset metadata needed to compile those files. Other pre-existing storage,
 networking, bootstrap, settings, texture and workflow changes remain outside it.
 
+## September 6, 2026: transfer components and storage coverage
+
+Registry work was committed as `728f49b`. The transfer milestone commit includes
+the following changes and their previously untracked storage/codec/carrier
+dependencies and Unity metadata. Unrelated session/bootstrap, project settings,
+textures and workflow changes are excluded.
+
+Follow-on implementation:
+
+- `Assets/_Project/Scripts/Networking/NetCode/Bulk/ChunkTransfer.cs`: strict,
+  versioned start/slice/applied-ACK/eviction frames; bounded two-transfer staging;
+  idempotent duplicates; atomic overlap validation; exact-generation cancellation.
+- `Assets/_Project/Scripts/Networking/NetCode/PlayModeTests/ChunkTransferTests.cs`:
+  retained the five existing contracts and added four boundary/validation cases.
+- `ChunkTransferIntegrationTests.cs` in the same test directory: actual IPC and
+  loopback UDP snapshot/delta transfers, queue backpressure, capture during edits,
+  replica publication before ACK and full solid/fluid comparison.
+- `Assets/_Project/Tests/EditMode/Voxels/ChunkDataTests.cs` and
+  `ChunkStorageTests.cs`: capture mutation/disposal safety, detached imports,
+  matching-baseline replica changes, records/provenance cleanup, no-op/invalid
+  batches, invalid cells and direct palette fallback. These tests passed against
+  the existing storage implementation; storage runtime code was not changed.
+- `Assets/_Project/Scripts/Networking/Chunks/ChunkImage.cs` and `ChunkWireCodec.cs`:
+  reject zero revisions consistently with storage and transfer declarations.
+  `Assets/_Project/Tests/EditMode/ChunkProtocol/ChunkWireCodecTests.cs` includes the
+  regression and uses nonzero baselines in existing malformed-data fixtures so
+  those assertions still reach their intended validation paths.
+
+Fresh Unity 6000.6.0f1 results in an isolated project using the actual source and
+installed package versions:
+
+| Suite | Result |
+| --- | --- |
+| Transfer tests against original stub | 0/5, then 0/9 with added boundaries |
+| Transfer frames/reassembler | 9/9 passed |
+| Expanded storage and codec tests before revision fix | 44/45 passed |
+| Final storage/registry/codec EditMode tests, edge 32 | 45/45 passed |
+| Isolated edge-16 and edge-64 storage/codec variants | 45/45 passed each |
+| Carrier, tickets, framing and composite IPC/UDP PlayMode tests | 19/19 passed |
+
+The zero-revision regression failed before the fix. The first fixed run exposed
+six older tests using zero-revision fixtures; these were updated to valid baselines
+without weakening their original corruption, index, ownership or length checks.
+Temporary XML/log evidence is under `.utmp/chunk-verification/`, using
+`transfer-red`, `transfer-boundaries-red`, `transfer-green`, `storage-red`,
+`storage-green`, `storage-final`, and `bulk-integration` names.
+Variant evidence is in `.utmp/chunk-verification-edge16/size16.xml` and
+`.utmp/chunk-verification-edge64/size64.xml`. Only the temporary copy of the
+single chunk-edge constant changes for those runs; production remains edge 32.
+
+The live project was left open. These runs validate the selected source components
+in Unity, not the complete DigBlocksDX assembly graph, bootstrap or admission
+integration. The integration fixture drives transfers directly; it is not a
+production scheduler or a 32-peer/loss/latency performance result.
+
+Documentation now reflects the approved independent carrier. The exact framing
+contract and ownership limits are in [chunk transfer protocol](chunk-transfer-protocol.md).
+The assembly map was regenerated and `Test-LeanWorkflow.ps1` passed.
+
 ## Remaining implementation
 
-Next: versioned transfer frames and bounded reassembly using the approved
-independent Unity Transport companion connection. Then strengthen storage/job
-lifetime coverage before world residency, admission binding, streaming schedules,
-applied acknowledgements, and full integration verification.
+The dependency order, completion criteria and later rendering consultation points
+are detailed in [meshing readiness](chunk-meshing-readiness.md).
+
+Next: world-owned resident chunk storage/entities and worker snapshot encoding,
+then admitted companion lifecycle, ticket offer/bind, live-registry checks,
+subscription scheduling, deadlines, eviction/history/resync, and independent data
+readiness. Test full session IPC/UDP lifecycle, stale traffic, loss/latency and
+multi-peer streaming before claiming completion. None of that is supplied by the
+component integration fixture.
 
 The approved carrier uses IPC for singleplayer and a configurable second UDP port
 for remote peers. Chunk payloads do not use NetCode RPC queues. No new major
-architectural decisions have been made in this resumption.
+architectural decisions have been made. Release budgets, view distances and
+production timeouts remain subject to measurement and user consultation.
