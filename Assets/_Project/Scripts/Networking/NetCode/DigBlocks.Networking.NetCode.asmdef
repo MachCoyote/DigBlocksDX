@@ -5,6 +5,7 @@
     "DigBlocks.Core",
     "DigBlocks.Networking",
     "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Runtime",
     "DigBlocks.ChunkProtocol",
     "Unity.Mathematics",
     "UniTask",

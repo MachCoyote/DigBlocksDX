@@ -8,11 +8,50 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using Cysharp.Threading.Tasks;
+using System.Reflection;
 
 namespace DigBlocks.Bootstrap.PlayModeTests
 {
     public sealed class DigBlocksBootstrapTests
     {
+        [UnityTest]
+        public IEnumerator ConcurrentBootstrapShutdownAwaitersShareCleanup()
+        {
+            var ownerObject = new GameObject("Concurrent Shutdown Bootstrap");
+            var owner = ownerObject.AddComponent<DigBlocksBootstrap>();
+            yield return WaitForStartup(owner);
+            var begin = typeof(DigBlocksBootstrap).GetMethod("BeginShutdownAsync", BindingFlags.Instance | BindingFlags.NonPublic);
+            var first = (UniTask)begin.Invoke(owner, null);
+            var second = (UniTask)begin.Invoke(owner, null);
+            yield return UniTask.WhenAll(first, second).ToCoroutine();
+            Assert.That(owner.HostState, Is.EqualTo(GameHostState.Stopped));
+            Assert.That(owner.LastFailure, Is.Null);
+        }
+
+        [UnityTearDown]
+        public IEnumerator Cleanup()
+        {
+            foreach (var bootstrap in UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>())
+                UnityEngine.Object.Destroy(bootstrap.gameObject);
+            //destruction drains the session before disposing runtime worlds.
+            double deadline = Time.realtimeSinceStartupAsDouble + 4;
+            while (Unity.NetCode.ClientServerBootstrap.ClientWorlds.Count > 0 || Unity.NetCode.ClientServerBootstrap.ServerWorlds.Count > 0)
+            {
+                Assert.That(Time.realtimeSinceStartupAsDouble, Is.LessThan(deadline), "Bootstrap leaked a network world.");
+                yield return null;
+            }
+        }
+
+        private static IEnumerator WaitForStartup(DigBlocksBootstrap bootstrap)
+        {
+            double deadline = Time.realtimeSinceStartupAsDouble + 12;
+            while (bootstrap.HostState is GameHostState.Created or GameHostState.Starting)
+            {
+                Assert.That(Time.realtimeSinceStartupAsDouble, Is.LessThan(deadline), "Bootstrap startup did not settle.");
+                yield return null;
+            }
+        }
         [UnityTest]
         public IEnumerator Bootstrap_StartsHostAndRejectsDuplicate()
         {
@@ -22,6 +61,8 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             duplicateObject.AddComponent<DigBlocksBootstrap>();
 
             yield return null;
+
+            yield return WaitForStartup(owner);
 
             DigBlocksBootstrap[] bootstraps = UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>();
             Assert.That(bootstraps, Has.Length.EqualTo(1));
@@ -41,6 +82,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
 
             DigBlocksBootstrap[] bootstraps = UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>();
             Assert.That(bootstraps, Has.Length.EqualTo(1));
+            yield return WaitForStartup(bootstraps[0]);
             Assert.That(bootstraps[0].HostState, Is.EqualTo(GameHostState.Running));
             Assert.That(bootstraps[0].LastFailure, Is.Null);
         }

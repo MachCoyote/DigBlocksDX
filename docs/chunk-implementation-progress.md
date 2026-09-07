@@ -87,12 +87,18 @@ The assembly map was regenerated and `Test-LeanWorkflow.ps1` passed.
 The dependency order, completion criteria and later rendering consultation points
 are detailed in [meshing readiness](chunk-meshing-readiness.md).
 
-Next: world-owned resident chunk storage/entities and worker snapshot encoding,
-then admitted companion lifecycle, ticket offer/bind, live-registry checks,
-subscription scheduling, deadlines, eviction/history/resync, and independent data
-readiness. Test full session IPC/UDP lifecycle, stale traffic, loss/latency and
-multi-peer streaming before claiming completion. None of that is supplied by the
-component integration fixture.
+World residency, bounded snapshot workers and admitted companion binding are now
+implemented. Next: interest/subscription scheduling, atomic replica publication,
+ACK/history/resync and independent data readiness, then loss/latency and multi-peer
+streaming measurements.
+
+The new milestone implements the user-approved leases and affected-peer failure
+policy, including IPC/UDP binding, compatibility checks, ticket replay protection,
+pending caps/deadlines, rollback and port configuration. Driver disposal now
+flushes UTP disconnect notifications. Fresh checks passed 70/70 EditMode, 43/43
+broad PlayMode and a later overlapping 12/12 companion suite. See the
+[implementation summary](chunk-residency-binding.md) for files, evidence and limits,
+and [research and decisions](chunk-residency-binding-plan.md) for comparisons.
 
 The approved carrier uses IPC for singleplayer and a configurable second UDP port
 for remote peers. Chunk payloads do not use NetCode RPC queues. No new major

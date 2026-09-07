@@ -12,7 +12,11 @@ portable snapshot/delta codecs, an independent reliable IPC/UDP driver, single-u
 tickets, transfer frames and bounded reassembly. Component tests combine these
 pieces successfully. They are not yet wired into a live game-world streaming service.
 
-## Remaining foundation work, in dependency order
+World residency, snapshot workers and companion binding (steps 1 and 2 below)
+are now complete. See [contracts and fresh verification](chunk-residency-binding.md).
+The table retains their completion criteria for context; steps 3–5 remain.
+
+## Foundation work, in dependency order
 
 | Step | Work remaining | Observable completion condition |
 | --- | --- | --- |
@@ -26,7 +30,7 @@ Steps 3 and 4 will need bounded implementation together: subscription identity,
 publication, acknowledgements and eviction must agree on one lifecycle. They are
 separate concerns, not an invitation to ship an unsafe intermediate service.
 
-The existing isolated Unity results are 45/45 EditMode tests at each temporary
+Earlier isolated Unity results were 45/45 EditMode tests at each temporary
 edge setting (16, 32, 64) and 19/19 PlayMode tests. Production edge is 32. These are
 component correctness results; they do not establish full-project integration,
 loss tolerance, or 32-peer streaming performance.
@@ -61,5 +65,6 @@ a scope decision, not an assumption made here.
 
 These are consultation points, not selections already made. Existing ECS,
 Burst/jobs where practical, server authority and separate client replicas remain
-constraints. The immediate next bounded task is world residency and snapshot
-worker ownership; no rendering architecture choice is needed to start that task.
+constraints. The next bounded task is defining interest/subscription and replica
+publication contracts for steps 3 and 4; no rendering architecture choice is
+needed yet.

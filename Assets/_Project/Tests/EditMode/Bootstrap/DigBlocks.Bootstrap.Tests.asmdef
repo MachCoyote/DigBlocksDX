@@ -5,6 +5,8 @@
     "DigBlocks.Bootstrap",
     "DigBlocks.Client",
     "DigBlocks.Core",
+    "DigBlocks.Networking",
+    "DigBlocks.Networking.NetCode",
     "DigBlocks.Server",
     "UniTask"
   ],

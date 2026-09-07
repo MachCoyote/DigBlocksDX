@@ -4,7 +4,9 @@
   "references": [
     "DigBlocks.Core",
     "DigBlocks.Networking",
-    "UniTask"
+    "UniTask",
+    "Unity.Collections",
+    "Unity.Entities"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

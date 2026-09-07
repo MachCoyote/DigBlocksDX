@@ -7,6 +7,7 @@
     "DigBlocks.Networking",
     "DigBlocks.Networking.NetCode",
     "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Runtime",
     "DigBlocks.ChunkProtocol",
     "Unity.Mathematics",
     "UniTask",

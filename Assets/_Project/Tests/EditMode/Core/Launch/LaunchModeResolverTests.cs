@@ -6,6 +6,12 @@ namespace DigBlocks.Core.Tests.Launch
 {
     public sealed class LaunchModeResolverTests
     {
+        [TestCase("--client")]
+        [TestCase("--singleplayer")]
+        public void Resolve_ServerBuildRejectsClientModes(string flag)
+        {
+            Assert.Throws<ArgumentException>(() => LaunchModeResolver.Resolve(LaunchMode.SinglePlayer, new[] { flag }, true));
+        }
         [TestCase(LaunchMode.SinglePlayer)]
         [TestCase(LaunchMode.RemoteClient)]
         [TestCase(LaunchMode.DedicatedServer)]

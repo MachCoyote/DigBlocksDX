@@ -5,7 +5,12 @@
     "DigBlocks.Client",
     "DigBlocks.Core",
     "DigBlocks.Server",
-    "UniTask"
+    "DigBlocks.Networking",
+    "DigBlocks.Networking.NetCode",
+    "DigBlocks.Voxels",
+    "UniTask",
+    "Unity.Entities",
+    "Unity.Collections"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

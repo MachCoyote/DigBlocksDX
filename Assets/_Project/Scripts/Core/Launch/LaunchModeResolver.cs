@@ -38,6 +38,8 @@ namespace DigBlocks.Core.Launch
                 resolvedMode = overrideMode;
             }
 
+            if (isServerBuild && resolvedMode != LaunchMode.DedicatedServer)
+                throw new ArgumentException("A dedicated server build cannot create a client world.", nameof(arguments));
             return new LaunchOptions(resolvedMode);
         }
 

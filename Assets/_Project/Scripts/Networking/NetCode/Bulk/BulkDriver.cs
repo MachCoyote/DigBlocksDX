@@ -208,7 +208,16 @@ namespace DigBlocks.Networking.NetCode
             if (disposed) return;
             disposed = true;
             updateJob.Complete();
-            if (driver.IsCreated) driver.Dispose();
+            if (driver.IsCreated)
+            {
+                try
+                {
+                    foreach (var connection in connections.Keys) driver.Disconnect(connection);
+                    //UTP requires one completed update to send disconnect notifications before disposal.
+                    driver.ScheduleUpdate().Complete();
+                }
+                finally { driver.Dispose(); }
+            }
             connections.Clear(); events.Clear(); disconnected.Clear(); closing.Clear(); sendOrder.Clear(); queuedMessages = 0;
         }
 

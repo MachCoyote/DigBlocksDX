@@ -3,8 +3,10 @@
 Implemented component contract, September 6, 2026. The carrier is
 `Assets/_Project/Scripts/Networking/NetCode/Bulk/BulkDriver.cs`; framing and staging
 are in `ChunkTransfer.cs` in the same directory. This is a companion-driver
-protocol, not a NetCode RPC schema. Admission binding and streaming ownership are
-still pending; these components must not be exposed as an admitted game service yet.
+protocol, not a NetCode RPC schema. [Admission binding and world ownership](chunk-residency-binding.md)
+are implemented. Automatic transfer routing and replica publication remain pending.
+Binding uses header kinds 1/2; chunk framing uses kinds 16..19. The current bound
+endpoint does not yet accept chunk-transfer traffic.
 
 ## Frame encoding
 

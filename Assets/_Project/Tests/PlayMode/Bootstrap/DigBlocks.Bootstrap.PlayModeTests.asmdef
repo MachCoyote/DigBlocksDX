@@ -4,6 +4,9 @@
   "references": [
     "DigBlocks.Bootstrap",
     "DigBlocks.Core",
+    "Unity.Entities",
+    "Unity.Collections",
+    "Unity.NetCode",
     "UniTask"
   ],
   "includePlatforms": [],

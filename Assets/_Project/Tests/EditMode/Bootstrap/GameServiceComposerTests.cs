@@ -5,6 +5,7 @@ using DigBlocks.Client.Runtime;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Launch;
 using DigBlocks.Server.Runtime;
+using DigBlocks.Networking.NetCode;
 using NUnit.Framework;
 
 namespace DigBlocks.Bootstrap.Tests
@@ -20,7 +21,9 @@ namespace DigBlocks.Bootstrap.Tests
             {
                 typeof(DiagnosticService),
                 typeof(ServerRuntime),
-                typeof(ClientRuntime)
+                typeof(ClientRuntime),
+                typeof(NetCodeSession),
+                typeof(ChunkCompanionService)
             }));
         }
 
@@ -32,7 +35,9 @@ namespace DigBlocks.Bootstrap.Tests
             Assert.That(serviceTypes, Is.EqualTo(new[]
             {
                 typeof(DiagnosticService),
-                typeof(ClientRuntime)
+                typeof(ClientRuntime),
+                typeof(NetCodeSession),
+                typeof(ChunkCompanionService)
             }));
         }
 
@@ -44,7 +49,9 @@ namespace DigBlocks.Bootstrap.Tests
             Assert.That(serviceTypes, Is.EqualTo(new[]
             {
                 typeof(DiagnosticService),
-                typeof(ServerRuntime)
+                typeof(ServerRuntime),
+                typeof(NetCodeSession),
+                typeof(ChunkCompanionService)
             }));
         }
 

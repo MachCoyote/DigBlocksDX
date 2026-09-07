@@ -74,9 +74,9 @@ published revisions, not transport delivery. Both sockets still share bandwidth
 and CPU; independent queues do not guarantee latency or throughput.
 
 Keep the established loss/latency and concurrent-control measurements below as
-integration requirements. Lifecycle, admission binding and streaming scheduling
-remain unfinished; the existing independent driver/ticket tests are component
-coverage only.
+integration requirements. [Lifecycle and admission binding](chunk-residency-binding.md)
+are implemented and tested with actual IPC/UDP sessions. Automatic streaming
+scheduling and publication remain unfinished.
 
 ## Configuration and registry agreement
 

@@ -53,8 +53,10 @@ RPC payload queue. All caps, cleanup paths, and failure states are testable.
   project; full-project integration verification remains pending.
 - Transfer framing/reassembly implemented and covered by component IPC/UDP tests.
   Expanded edge-32 storage/codec tests pass 45/45; bulk PlayMode tests pass 19/19.
-- Resident store, admission binding,
-  streaming lifecycle, interest/ACK scheduling and end-to-end verification remain.
+- World residency, bounded snapshot workers and admitted companion lifecycle are
+  implemented; see [contracts and evidence](chunk-residency-binding.md).
+- Interest streaming, client publication, ACK/history/resync scheduling and
+  end-to-end streaming verification remain.
 
 See [meshing readiness](chunk-meshing-readiness.md) for the remaining integration
 milestones and the boundary between streaming completion and initial visualization.

@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
+using DigBlocks.Networking;
+using DigBlocks.Networking.NetCode;
 
 namespace DigBlocks.Bootstrap
 {
@@ -20,7 +22,7 @@ namespace DigBlocks.Bootstrap
         private GameHost host;
         private IGameLogger logger;
         private GameHostState state = GameHostState.Created;
-        private UniTask shutdownTask;
+        private UniTaskCompletionSource shutdownCompletion;
         private UniTask startupTask;
         private bool shutdownComplete;
         private bool shutdownStarted;
@@ -32,6 +34,8 @@ namespace DigBlocks.Bootstrap
         public LaunchOptions LaunchOptions { get; private set; }
 
         public Exception LastFailure { get; private set; }
+        public INetworkSession NetworkSession { get; private set; }
+        public ChunkCompanionService ChunkCompanion { get; private set; }
 
         private void Awake()
         {
@@ -105,10 +109,18 @@ namespace DigBlocks.Bootstrap
             if (!shutdownStarted)
             {
                 shutdownStarted = true;
-                shutdownTask = ShutdownHostAsync().Preserve();
+                shutdownCompletion = new UniTaskCompletionSource();
+                CompleteShutdownAsync().Forget();
             }
 
-            return shutdownTask;
+            return shutdownCompletion.Task;
+        }
+
+        private async UniTask CompleteShutdownAsync()
+        {
+            //quit and destruction may both await the same in-flight cleanup.
+            try { await ShutdownHostAsync(); shutdownCompletion.TrySetResult(); }
+            catch (Exception exception) { shutdownCompletion.TrySetException(exception); }
         }
 
         private async UniTask ShutdownHostAsync()
@@ -147,7 +159,13 @@ namespace DigBlocks.Bootstrap
                     IsServerBuild());
 
 
-                IReadOnlyList<IGameService> services = GameServiceComposer.Compose(LaunchOptions, logger);
+                var network = NetworkLaunchSettings.Parse(Environment.GetCommandLineArgs(), LaunchOptions.Mode, Application.persistentDataPath);
+                IReadOnlyList<IGameService> services = GameServiceComposer.Compose(LaunchOptions, logger, network);
+                foreach (var service in services)
+                {
+                    if (service is INetworkSession session) NetworkSession = session;
+                    if (service is ChunkCompanionService companion) ChunkCompanion = companion;
+                }
                 host = new GameHost(services, logger);
 
 

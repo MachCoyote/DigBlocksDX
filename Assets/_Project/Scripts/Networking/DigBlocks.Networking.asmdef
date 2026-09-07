@@ -3,7 +3,9 @@
   "rootNamespace": "DigBlocks.Networking",
   "references": [
     "DigBlocks.Core",
-    "UniTask"
+    "UniTask",
+    "Unity.Collections",
+    "Unity.Entities"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
