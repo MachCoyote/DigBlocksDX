@@ -2,7 +2,7 @@
 
 ## Status
 
-This is the current approved project direction as of September 3, 2026.
+This is the current approved project direction as of September 7, 2026.
 
 ## Repository Map
 
@@ -12,7 +12,8 @@ Assets/_Project/
 │   ├── Core/                 lifecycle, launch, logging, shared primitives
 │   ├── Networking/           transport-independent session/protocol contracts
 │   │   └── NetCode/          Unity NetCode and Transport integration
-│   ├── Client/               client-world coordination and presentation bridges
+│   ├── Client/               client-world coordination, application flow, input
+│   │   └── UI/               menu navigation, menu views, persistent UI root
 │   ├── Server/               authoritative server-world coordination
 │   └── Bootstrap/            Unity entry point and composition root
 └── Tests/
@@ -52,7 +53,14 @@ DigBlocks.Client  DigBlocks.Server  DigBlocks.Networking.NetCode
                               |
                               v
                        DigBlocks.Core
+                              ^
+                              |
+                     DigBlocks.Client.UI   (also referenced by DigBlocks.Client)
 ```
+
+Client UI depends only on Core, uGUI and the input system. It must not reference
+Networking, NetCode or ECS assemblies, so presentation cannot reach session or
+simulation state directly; it reports intent and application flow interprets it.
 
 Core must not depend on higher layers. Networking owns portable contracts;
 NetCode implements them. Bootstrap may see all runtime assemblies because it is
@@ -69,6 +77,9 @@ transport-specific implementation.
 | Chunk storage, registry, or portable codec | `Scripts/Voxels`, `Scripts/Networking/Chunks`, and their EditMode tests |
 | NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
+| Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
+| Application state, play/pause/quit intent | `Scripts/Client/Flow`, then `Scripts/Client/Input` |
+| Session lifetime or world readiness | `Scripts/Bootstrap/Session`, then `Scripts/Core/Session` |
 | Architecture or dependency question | this document, then the generated assembly map and relevant `.asmdef` |
 | Package/API version question | `Packages/manifest.json`, `packages-lock.json`, and `docs/deprecations.md` |
 | Test placement | the matching assembly under `Tests/EditMode`, `Tests/PlayMode`, or NetCode `PlayModeTests` |
@@ -110,8 +121,11 @@ presentation and authoring code must be removable from this build.
   and other framework-independent primitives.
 - `DigBlocks.Bootstrap` is the Unity composition root. It chooses the launch mode
   and constructs the ordered application services.
-- `DigBlocks.Client` owns client-world coordination and GameObject presentation
-  bridges.
+- `DigBlocks.Client` owns client-world coordination, GameObject presentation
+  bridges, application flow, and client input routing.
+- `DigBlocks.Client.UI` owns menu navigation, menu creation, menu views and the
+  persistent UI root. It is client presentation only and holds no session,
+  simulation or transport knowledge.
 - `DigBlocks.Server` owns authoritative server-world coordination.
 - `DigBlocks.Networking` owns transport-independent session and protocol
   contracts.
@@ -125,6 +139,11 @@ presentation and authoring code must be removable from this build.
 `ClientRuntime` and `ServerRuntime` coordinate lifecycle around the native
 session. `NetCodeSession` and `NetCodeWorldFactory` create, expose and dispose
 the separate ECS worlds. Per-entity gameplay logic belongs in ECS systems.
+
+`GameSessionController` owns one session lifetime at a time and holds the session
+`GameHost`; application-lifetime services stay in Bootstrap. A client's session is
+created on the play action and disposed on returning to the title screen, so a
+session is never assumed to exist while a menu is on screen.
 
 ## Entity Model
 
@@ -221,11 +240,13 @@ ownership, failure handling and the next integration boundary.
 1. Core bootstrap and service/world lifetime are implemented.
 2. The network admission/session foundation is implemented; see its verification
    record for tested scenarios and remaining platform limitations.
-3. Design and implement the transport-independent three-dimensional chunk data
+3. The client UI, menu navigation, application flow and session lifetime
+   foundation is implemented; see `docs/ui-menu-foundation.md`.
+4. Design and implement the transport-independent three-dimensional chunk data
    model.
-4. Add chunk interest, snapshot, delta, and transmission systems.
-5. Add client meshing and rendering.
-6. Add dynamic entity simulation and ghost authoring incrementally.
+5. Add chunk interest, snapshot, delta, and transmission systems.
+6. Add client meshing and rendering.
+7. Add dynamic entity simulation and ghost authoring incrementally.
 
 This sequence deliberately establishes connection and world ownership before
 chunk transmission while keeping the chunk model reusable in tests, persistence,

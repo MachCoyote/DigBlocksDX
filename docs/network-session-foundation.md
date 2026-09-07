@@ -2,7 +2,7 @@
 
 This slice owns connection admission and lifetime. It deliberately stops at
 `AwaitingWorldData`: no player ghosts or `NetworkStreamInGame` are created.
-Bootstrap also starts the [chunk companion service](chunk-residency-binding.md),
+The session also starts the [chunk companion service](chunk-residency-binding.md),
 which owns separate stores, pins one server dummy chunk and waits for binding.
 Dedicated servers can set `--bulk-port` (default game port + 1); clients use the
 advertised port, and singleplayer uses IPC. Inspect
@@ -10,6 +10,12 @@ advertised port, and singleplayer uses IPC. Inspect
 A running `GameHost` means its services started,
 not that a playable world exists. Check `DigBlocksBootstrap.NetworkSession.State`
 for current connection status; it continues to change after startup.
+
+A client composes these services when the player chooses play rather than at
+launch, and disposes them on returning to the title screen; a dedicated server
+still starts its session directly. See the
+[UI and menu foundation](ui-menu-foundation.md) for session lifetime, the explicit
+world-ready gate that consumes `AwaitingWorldData`, and the accessors above.
 
 ## Run it
 
@@ -126,8 +132,8 @@ from the player loop and dispose their drivers, releasing listeners. Always stop
 the **host**, not only the network service, to release world-owned sockets. A
 partially started session cleans its own state before host rollback disposes the
 worlds. Stop is idempotent; a session is one-shot. Manual rejoin composes a fresh
-`GameHost`, worlds and session, as exercised by the integration tests. A menu-level
-session switching UI is not part of this slice.
+`GameHost`, worlds and session, as exercised by the integration tests. Menu-driven
+session switching is owned by the [UI and menu foundation](ui-menu-foundation.md).
 
 The existing 30 Hz simulation/network rates remain a starting value; forced
 busy-waiting has been removed. Tune tick rates against real gameplay profiling.
@@ -145,6 +151,8 @@ busy-waiting has been removed. Tune tick rates against real gameplay profiling.
   start/stop and server kick entry point.
 - `Scripts/Bootstrap/GameServiceComposer.cs`: diagnostics → server world → client
   world → session (omit worlds unused by the selected role). Stop reverses this.
+- `Scripts/Bootstrap/Session/GameSessionController.cs`: session creation, the
+  explicit readiness wait, teardown, and rejection of overlapping operations.
 
 The next design discussion begins at `AwaitingWorldData`. Decide the 3D chunk
 coordinates, ownership/storage, registry compatibility, snapshot/delta formats,
