@@ -1,15 +1,12 @@
 {
-  "name": "DigBlocks.Bootstrap.Tests",
-  "rootNamespace": "DigBlocks.Bootstrap.Tests",
+  "name": "DigBlocks.Client.Tests",
+  "rootNamespace": "DigBlocks.Client.Tests",
   "references": [
-    "DigBlocks.Bootstrap",
     "DigBlocks.Client",
     "DigBlocks.Client.UI",
     "DigBlocks.Core",
-    "DigBlocks.Networking",
-    "DigBlocks.Networking.NetCode",
-    "DigBlocks.Server",
-    "UniTask"
+    "UniTask",
+    "UnityEngine.UI"
   ],
   "includePlatforms": [
     "Editor"

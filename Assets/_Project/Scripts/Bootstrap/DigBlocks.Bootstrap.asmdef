@@ -3,6 +3,7 @@
   "rootNamespace": "DigBlocks.Bootstrap",
   "references": [
     "DigBlocks.Client",
+    "DigBlocks.Client.UI",
     "DigBlocks.Core",
     "DigBlocks.Server",
     "DigBlocks.Networking",

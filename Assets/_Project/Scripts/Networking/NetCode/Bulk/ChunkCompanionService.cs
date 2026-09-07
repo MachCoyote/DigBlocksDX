@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using DigBlocks.Core.Hosting;
+using DigBlocks.Core.Session;
 using DigBlocks.Voxels;
 using DigBlocks.Voxels.Runtime;
 using Unity.Entities;
@@ -10,7 +11,7 @@ namespace DigBlocks.Networking.NetCode
 {
     public enum ChunkConnectionState { Stopped, AwaitingOffer, Binding, Bound, Listening, Faulted }
 
-    public sealed class ChunkCompanionService : IGameService
+    public sealed class ChunkCompanionService : IGameService, ISessionReadinessSource
     {
         private readonly NetCodeSession session;
         private readonly ushort? bulkPort;
@@ -50,6 +51,21 @@ namespace DigBlocks.Networking.NetCode
         public int PendingBindingCount => serverEndpoint?.PendingBindingCount ?? 0;
         public ChunkConnectionState ClientState => startupFailure != NetworkFailure.None ? ChunkConnectionState.Faulted : clientEndpoint?.State ?? ChunkConnectionState.Stopped;
         public NetworkFailure LastFailure => startupFailure != NetworkFailure.None ? startupFailure : clientEndpoint?.Failure ?? NetworkFailure.None;
+
+        public string ReadinessDescription => "Binding the world data channel...";
+
+        //the explicit world-ready gate the session layer waits on. Startup already blocks until the
+        //client bulk endpoint is bound, so this verifies the world data channel instead of inferring
+        //readiness from the game connection. Tighten this to ClientDataReady once gameplay drives
+        //server chunk interest, so a session is only playable with streamed chunks in hand.
+        public UniTask WaitUntilReadyAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (LastFailure != NetworkFailure.None) throw new NetworkSessionException(LastFailure);
+            if (session.Role != NetworkSessionRole.Server && ClientState != ChunkConnectionState.Bound)
+                throw new NetworkSessionException(NetworkFailure.ChunkChannelFailed);
+            return UniTask.CompletedTask;
+        }
 
         public async UniTask StartAsync(CancellationToken token)
         {

@@ -1,13 +1,9 @@
 {
-  "name": "DigBlocks.Client",
-  "rootNamespace": "DigBlocks.Client",
+  "name": "DigBlocks.Client.UI",
+  "rootNamespace": "DigBlocks.Client.UI",
   "references": [
-    "DigBlocks.Client.UI",
     "DigBlocks.Core",
-    "DigBlocks.Networking",
     "UniTask",
-    "Unity.Collections",
-    "Unity.Entities",
     "Unity.InputSystem",
     "UnityEngine.UI"
   ],

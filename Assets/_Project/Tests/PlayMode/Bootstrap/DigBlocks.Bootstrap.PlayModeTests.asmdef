@@ -3,11 +3,14 @@
   "rootNamespace": "DigBlocks.Bootstrap.PlayModeTests",
   "references": [
     "DigBlocks.Bootstrap",
+    "DigBlocks.Client",
+    "DigBlocks.Client.UI",
     "DigBlocks.Core",
     "Unity.Entities",
     "Unity.Collections",
     "Unity.NetCode",
-    "UniTask"
+    "UniTask",
+    "DigBlocks.Networking"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
