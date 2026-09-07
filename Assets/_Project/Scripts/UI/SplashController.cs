@@ -1,4 +1,5 @@
 using Cysharp.Threading.Tasks;
+using System.Threading;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,43 +11,55 @@ public class SplashController : MonoBehaviour
     private string _splashText = "You shouldn't be seeing this!";
     public float blinkInterval = 0.5f;
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    CancellationTokenSource disableCts;
+    CancellationTokenSource linkedCts;
+    public CancellationToken ActiveToken => linkedCts?.Token ?? CancellationToken.None;
+
+    private void OnEnable()
     {
+        disableCts = new CancellationTokenSource();
+        linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            disableCts.Token,
+            destroyCancellationToken
+        );
+
         _splashText = GetRandomLine(SplashTextAsset);
         SplashText.text = "";
-        TypeText().Forget();
+        TypeText(linkedCts.Token).Forget();
     }
 
-    // Update is called once per frame
-    void Update()
+    private void OnDisable()
     {
-
+        linkedCts?.Cancel();
+        linkedCts?.Dispose();
+        linkedCts = null;
+        disableCts?.Dispose();
+        disableCts = null;
     }
 
-    private async UniTask TypeText()
+    private async UniTask TypeText(CancellationToken tok)
     {
         SplashText.text = "";
         foreach (char c in _splashText)
         {
             SplashText.text += c + "_";
-            await UniTask.Delay(50);
+            await UniTask.Delay(50, cancellationToken: tok);
             SplashText.text = SplashText.text.Substring(0, SplashText.text.Length - 1);
         }
 
-        BlinkCursor().Forget();
+        BlinkCursor(tok).Forget();
     }
 
-    private async UniTask BlinkCursor()
+    private async UniTask BlinkCursor(CancellationToken tok)
     {
         string ogText = SplashText.text;
-        string cursorText = SplashText.text + "_";
+        string cursorText = ogText + "_";
         while (true)
         {
             SplashText.text = ogText;
-            await UniTask.Delay((int)(blinkInterval * 1000));
+            await UniTask.Delay((int)(blinkInterval * 1000), cancellationToken: tok);
             SplashText.text = cursorText;
-            await UniTask.Delay((int)(blinkInterval * 1000));
+            await UniTask.Delay((int)(blinkInterval * 1000), cancellationToken: tok);
         }
     }
 
