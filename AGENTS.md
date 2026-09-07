@@ -1,71 +1,94 @@
-# DigBlocksDX development guidance
+# DigBlocksDX agent guide
 
-DigBlocks is a Unity 6.6-based voxel game that aims to mimic and expand upon
-early-release-era Minecraft. Development direction is primarily user-led.
+DigBlocksDX is a Unity 6.6 voxel game inspired by early-release Minecraft.
 
-## Architecture direction
+Development direction is user-led; scale implementation to the scope requested.
 
-- Use Unity Entities/ECS as the primary runtime model for gameplay simulation.
-- Use Netcode for Entities as the sole networking framework. Do not introduce
-  Netcode for GameObjects or `NetworkObject`-based replication.
-- Keep the server authoritative. Ordinary mobs are interpolated ghosts; reserve
-  prediction and rollback for locally controlled or otherwise latency-sensitive
-  entities.
-- Run separate client and server ECS worlds in the same process for
-  single-player. Dedicated servers run only the authoritative server world.
-- Keep Core lifecycle code, voxel storage, save formats, and protocol contracts
-  independent of `Unity.NetCode` wherever practical. Package-specific network
-  integration belongs in `DigBlocks.Networking.NetCode`.
-- Use entities and ghosts for dynamic objects such as players, mobs, dropped
-  items, and projectiles. Do not create one entity or ghost per voxel block.
-- Store voxel data in coarse three-dimensional chunks using unmanaged,
-  job-friendly containers. Transmit chunk snapshots and deltas through a
-  dedicated bulk-data protocol rather than ordinary per-block ghost replication.
-- Prefer unmanaged components, Burst-compatible systems, jobs, blob assets, and
-  baking for hot simulation paths and runtime content data. Keep GameObjects for
-  bootstrapping, authoring, UI, and presentation where they are the better fit.
+## Start here
+
+* Use [docs/architecture.md](docs/architecture.md) when repository-wide architectural context, subsystem ownership, dependency direction, runtime topology, or task navigation is needed. Do not reread it when the relevant context is already established in the current session.
+* Read focused docs only when relevant. Networking details live in [docs/network-session-foundation.md](docs/network-session-foundation.md), and known API migrations live in [docs/deprecations.md](docs/deprecations.md).
+* Treat `docs/superpowers/specs/` and `docs/superpowers/plans/` as historical design records, not the current default workflow. Read them only when the current task specifically depends on an earlier design decision.
+* Regenerate the machine-derived assembly index with `powershell -File tools/Update-RepositoryMap.ps1` after changing `.asmdef` files. Do not hand-edit `docs/generated/assembly-map.md`.
+* This guide is the canonical agent context for every tool. `CLAUDE.md` only re-exports it for Claude Code; do not add tool-specific instructions there. Workflow skills are authored once under `.agents/skills/<name>/` (Codex reads these plus `agents/openai.yaml`); regenerate the Claude Code mirror under `.claude/skills/` with `pwsh -File tools/Sync-AgentSkills.ps1` after editing any skill.
+
+## Context economy
+
+* Reuse relevant context already established in the current session; do not reread files without a concrete reason.
+* Prefer targeted searches and bounded file reads over repository-wide exploration or printing whole large files.
+* Once the affected subsystem and relevant files are known, keep subsequent investigation focused there unless evidence requires expanding scope.
+* Keep command and tool output narrow. Prefer summaries, structured results, targeted searches, and relevant log excerpts over complete logs or generated artifacts.
+* Do not ingest complete Unity compiler logs, test logs, XML result files, or other large outputs when bounded evidence is sufficient. Expand output only to diagnose a failure or ambiguity.
+* Avoid repeating already-successful inspections or checks unless subsequent changes could invalidate them.
+* Use subagents only for genuinely independent workstreams when their likely benefit exceeds duplicated context and coordination overhead.
+
+## Essential commands
+
+* Lean workflow checks: `powershell -File tools/Test-LeanWorkflow.ps1`
+* Fresh compile: `unity -batchmode -nographics -quit -projectPath . -logFile .utmp/compile.log`
+* EditMode tests: `unity -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults .utmp/editmode-results.xml -logFile .utmp/editmode.log`
+* PlayMode tests: `unity -batchmode -nographics -projectPath . -runTests -testPlatform PlayMode -testResults .utmp/playmode-results.xml -logFile .utmp/playmode.log`
+
+Use Unity MCP for live-editor checks when it adds value. Treat it as optional; prefer the CLI for checks that do not require live editor state, and continue with the CLI when the MCP server is unavailable.
+
+When inspecting Unity results, start with structured test summaries, errors, warnings, and bounded log excerpts. Do not print complete logs by default.
+
+## Architectural constraints
+
+* Use Unity Entities/ECS as the primary gameplay simulation model.
+* Use Burst-compiled code for performance-sensitive code whenever practical.
+* Move work to jobs or background threads where practical, especially simulation work, without violating Unity thread-safety constraints.
+* Use Netcode for Entities exclusively; do not add Netcode for GameObjects or `NetworkObject` replication.
+* Keep the server authoritative. Predict only locally controlled or otherwise latency-sensitive entities; ordinary mobs are interpolated ghosts.
+* Single-player runs separate client and server ECS worlds in one process.
+* Dedicated servers run only the authoritative server world.
+* Keep Core lifecycle, voxel storage, save formats, and protocol contracts independent of `Unity.NetCode` where practical. NetCode integration belongs in `DigBlocks.Networking.NetCode`.
+* Use entities and ghosts for dynamic objects, never one entity or ghost per voxel block.
+* Store voxels in coarse three-dimensional chunks using unmanaged, job-friendly containers. Send snapshots and deltas through a bulk-data protocol rather than per-block ghost replication.
+* Prefer unmanaged components, Burst-compatible systems, jobs, blob assets, and baking in hot paths. GameObjects remain valid for bootstrap, authoring, UI, and presentation.
 
 ## Scope and autonomy
 
-- Treat architectural discussions, implementation guidance, and research as
-  consultative work. Do not independently make broad or major project changes
-  unless the request clearly authorizes them.
-- For boilerplate or scaffolding requests, create only the requested folder
-  layout, types, member signatures, and other high-level structure. Do not
-  fill in deeper implementations unless asked.
-- Implement a complete system only when the user explicitly requests an
-  end-to-end implementation.
+* Consultation, guidance, and research do not authorize broad project changes.
+* For scaffolding requests, create only the requested structure and signatures.
+* Implement a complete system only when the request explicitly asks for it.
+* Preserve unrelated user changes in the worktree.
+* Do not expand task scope merely because adjacent cleanup or refactoring is possible.
 
-## Superpowers workflow
+## Lean workflow
 
-- For small, mechanical changes (for example a focused method edit or tests
-  updated for a small signature change), do not invoke the Superpowers
-  framework. Plan and verify the work proportionately.
-- Use the full relevant planning and implementation toolset for architectural,
-  cross-cutting, or larger implementation work.
+Classify work by actual risk and blast radius:
 
-## Code style
+* Small: inspect only the relevant code, make the change, and run focused verification. No workflow skill, plan file, worktree, or subagent.
+* Medium: inspect the affected subsystem, implement with focused tests where useful, then verify. Load at most one matching workflow skill when it materially improves confidence.
+* Large/cross-cutting: use `planning-architecture`, implement in bounded steps, use TDD where behavior has meaningful testable contracts, then verify.
 
-- Prefer `Cysharp.Threading.Tasks.UniTask` for asynchronous Unity and game
-  code. Do not introduce `System.Threading.Tasks.Task` unless a required
-  external API or test runner explicitly requires it.
-- Add only concise comments where they give useful context in high-traffic
-  code. Write them in this form: `//like this` (no space or capital letter
-  immediately after `//`). Avoid comment clutter.
-- Separate important/grouped bits of code with line breaks to improve readability, but don't be overzealous.
+Use workflow skills selectively:
 
-## Verification
+* Unknown bug or unexpected failure: `systematic-debugging` when structured root-cause investigation is needed.
+* New or changed observable behavior: `test-driven-development` when a meaningful regression test is practical and the workflow adds value.
+* New subsystem, migration, risky refactor, public contract change, or change crossing architectural boundaries: `planning-architecture`.
+* High-risk or multi-step completion where routine focused verification is insufficient: `verification-before-completion`.
 
-- Before reporting work complete, inspect fresh Unity compiler and test output
-  for errors; do not infer success from a command exit code or a partial log.
+Do not invoke a skill merely because it could be relevant. Routine implementation, compilation, testing, diff inspection, and straightforward fixes do not require a workflow skill.
 
-## Unity tooling
+Avoid skill chains unless each additional skill addresses a distinct unresolved risk. Do not reload a skill whose relevant instructions are already established in the current session.
 
-- The Unity CLI is installed. Prefer it for Unity operations it supports.
-- Unity MCP is also available; use it to supplement the CLI when needed. The
-  MCP server may not be running, so check its availability and continue with
-  the CLI or another appropriate local approach when it is unavailable.
-- If that is the case, and the work being done would heavily benefit from usage of the MCP server, prompt the user to enable it.
+## Code and guidance style
 
-## File handling and Line Endings
-- Maintain the existing line-ending style of every touched file; default to CRLF for new files unless the target location dictates LF.
+* Prefer `Cysharp.Threading.Tasks.UniTask` for Unity/game async code. Use `System.Threading.Tasks.Task` only when an external API or test runner requires it.
+* Add concise comments only where they clarify non-obvious, high-traffic code. Format them as `//like this`.
+* Separate important groups with whitespace without fragmenting the code.
+* Preserve each touched file's line endings; default new files to CRLF.
+* In implementation guides, name every file being changed and cover each system consistently from start to finish. Give code examples and explain important signatures or syntax choices.
+* Present small focused types in one piece. Guide larger systems incrementally; do not skip implementations near the end.
+
+## Definition of done
+
+* Tests validate observable behavior and real contracts, not mocks or trivial implementation details.
+* Run the narrowest useful checks during development; broaden only when the affected blast radius warrants it.
+* Inspect the final diff for unrelated edits, duplicate abstractions, architectural violations, missing tests, and stale comments/docs.
+* Before reporting meaningful code work complete, obtain fresh evidence from the relevant Unity compiler or test checks.
+* Inspect summaries, failure details, warnings, and relevant log excerpts rather than complete logs unless deeper diagnosis is necessary.
+* Do not repeat already-green checks unless subsequent changes could have affected them.
+* Report actual verification results and disclose anything not run.

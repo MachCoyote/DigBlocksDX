@@ -55,8 +55,12 @@ RPC payload queue. All caps, cleanup paths, and failure states are testable.
   Expanded edge-32 storage/codec tests pass 45/45; bulk PlayMode tests pass 19/19.
 - World residency, bounded snapshot workers and admitted companion lifecycle are
   implemented; see [contracts and evidence](chunk-residency-binding.md).
-- Interest streaming, client publication, ACK/history/resync scheduling and
-  end-to-end streaming verification remain.
+- Interest streaming, atomic client publication, ACK/history/resync scheduling
+  and production IPC/UDP verification are implemented. See the
+  [streaming summary](chunk-streaming-implementation.md) for current evidence,
+  configurable bounds, scale measurements and limits.
 
-See [meshing readiness](chunk-meshing-readiness.md) for the remaining integration
-milestones and the boundary between streaming completion and initial visualization.
+Earlier result counts above describe individual historical milestones. Current
+full-path verification supersedes their pending integration notes. See
+[meshing readiness](chunk-meshing-readiness.md) for the stopping point and the
+unimplemented rendering decisions.

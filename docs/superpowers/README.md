@@ -1,21 +1,17 @@
-# Superpowers notes
+# Historical Superpowers records
 
-Use the Superpowers framework selectively in this repository.
+The specs and plans below are retained as useful design history. They are not
+the repository's active orchestration framework.
 
-- Skip it for small, mechanical tasks such as a focused method update or
-  updating tests for a small signature change. Still plan and verify the
-  change proportionately.
-- Use the full relevant planning and implementation workflow for larger,
-  cross-cutting, or architectural work.
-- Preserve the user's development direction. Consultation and scaffolding
-  requests do not authorize broad implementation work.
+Superpowers 6.3.0 remains installed and enabled for the user globally, but
+`.codex/config.toml` disables the plugin in this trusted repository. Removing
+that local override restores the previous availability without reinstalling or
+recovering deleted files.
 
-The canonical agent instructions are in [AGENTS.md](../../AGENTS.md).
-The current game and networking direction is documented in
-[architecture.md](../architecture.md).
+Current workflow guidance lives in [AGENTS.md](../../AGENTS.md). Stable project
+structure and architectural rationale live in
+[architecture.md](../architecture.md). Four small project skills under
+`.agents/skills/` load only when their trigger descriptions materially match.
 
-## Unity tooling
-
-Prefer the installed Unity CLI for supported Unity operations. Use Unity MCP
-where it adds capabilities the CLI does not provide, but treat its server as
-optional because it may not be running.
+New routine work should not add a design or plan here. Add durable design
+documentation only when it will remain useful beyond the implementation task.

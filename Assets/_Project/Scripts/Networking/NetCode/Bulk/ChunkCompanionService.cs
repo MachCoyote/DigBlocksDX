@@ -20,19 +20,30 @@ namespace DigBlocks.Networking.NetCode
         private ChunkWorldSystem serverStore, clientStore;
         private BulkCompanionSystem serverSystem, clientSystem;
         private BulkCompanionEndpoint serverEndpoint, clientEndpoint;
-        private ChunkLease dummyLease;
+        private readonly ChunkStreamingOptions streamingOptions;
         private bool started, stopped;
         private NetworkFailure startupFailure;
 
         public ChunkCompanionService(NetCodeSession session, ushort? bulkPort = null, BlockRegistry registry = null,
-            double bindingTimeoutSeconds = 10, int maxPendingBindings = 16)
+            double bindingTimeoutSeconds = 10, int maxPendingBindings = 16, ChunkStreamingOptions streamingOptions = null)
         {
+            this.streamingOptions = streamingOptions ?? new ChunkStreamingOptions();
             this.session = session ?? throw new ArgumentNullException(nameof(session));
             if (!(bindingTimeoutSeconds > 0 && bindingTimeoutSeconds <= 120)) throw new ArgumentOutOfRangeException(nameof(bindingTimeoutSeconds));
             if (maxPendingBindings < 1 || maxPendingBindings > 128) throw new ArgumentOutOfRangeException(nameof(maxPendingBindings));
             if (bulkPort.HasValue && session.Role != NetworkSessionRole.Server) throw new ArgumentException("Only a remote server chooses a bulk port.", nameof(bulkPort));
             this.bulkPort = bulkPort; this.registry = registry ?? BlockRegistry.CreateDummy(); bindingTimeout = bindingTimeoutSeconds; maxPending = maxPendingBindings;
         }
+        public bool ClientDataReady => clientEndpoint?.DataReady ?? false;
+        public long SentChunkBytes => serverEndpoint?.SentChunkBytes ?? 0;
+        public long AppliedChunkAcknowledgements => serverEndpoint?.AppliedChunkAcknowledgements ?? 0;
+        public long SentChunkSnapshots => serverEndpoint?.SentChunkSnapshots ?? 0;
+        public long SentChunkDeltas => serverEndpoint?.SentChunkDeltas ?? 0;
+        public double MaxAppliedAckSeconds => serverEndpoint?.MaxAppliedAckSeconds ?? 0;
+        public int PeakEncodedPayloadBytes => serverEndpoint?.PeakEncodedPayloadBytes ?? 0;
+        public int PendingChunkPayloads => serverEndpoint?.PendingChunkPayloads ?? 0;
+        public bool SetServerInterest(ulong peerId, ChunkAddress anchor, int horizontalRadius, int verticalRadius) =>
+            serverEndpoint?.SetInterest(peerId, anchor, horizontalRadius, verticalRadius) ?? false;
         public string Name => nameof(ChunkCompanionService);
         public ushort ListeningPort => serverEndpoint?.Port ?? 0;
         public int BoundPeerCount => serverEndpoint?.BoundPeerCount ?? 0;
@@ -54,7 +65,6 @@ namespace DigBlocks.Networking.NetCode
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Server world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
                     owner.Configure(registry); serverStore = owner;
-                    dummyLease = owner.Store.Acquire(new ChunkAddress(1, default));
                     ushort port = 0;
                     if (!ipc)
                     {
@@ -64,7 +74,7 @@ namespace DigBlocks.Networking.NetCode
                     }
                     serverSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (serverSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
-                    try { serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending); }
+                    try { serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending, streamingOptions); }
                     catch (InvalidOperationException) { throw new NetworkSessionException(NetworkFailure.ListenFailed); }
                     serverSystem.Endpoint = serverEndpoint;
                 }
@@ -73,10 +83,10 @@ namespace DigBlocks.Networking.NetCode
                     var world = session.ClientWorld;
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Client world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
-                    owner.Configure(registry); clientStore = owner;
+                    owner.Configure(registry).EnableReplicas(); clientStore = owner;
                     clientSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (clientSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
-                    clientEndpoint = new BulkCompanionEndpoint(world, false, ipc, 0, registry, bindingTimeout, maxPending);
+                    clientEndpoint = new BulkCompanionEndpoint(world, false, ipc, 0, registry, bindingTimeout, maxPending, streamingOptions);
                     clientSystem.Endpoint = clientEndpoint;
                     while (clientEndpoint.State != ChunkConnectionState.Bound)
                     {
@@ -105,7 +115,6 @@ namespace DigBlocks.Networking.NetCode
             clientEndpoint?.Dispose(); serverEndpoint?.Dispose();
             if (session.ClientWorld is { IsCreated: true }) { clientSystem?.ReleaseEndpoint(); clientStore?.ReleaseStore(); }
             if (session.ServerWorld is { IsCreated: true }) { serverSystem?.ReleaseEndpoint(); serverStore?.ReleaseStore(); }
-            dummyLease?.Dispose(); dummyLease = null;
             return UniTask.CompletedTask;
         }
     }

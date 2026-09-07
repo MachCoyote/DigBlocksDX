@@ -1,12 +1,11 @@
 # Independent chunk transfer protocol
 
-Implemented component contract, September 6, 2026. The carrier is
+Implemented live protocol, September 7, 2026. The carrier is
 `Assets/_Project/Scripts/Networking/NetCode/Bulk/BulkDriver.cs`; framing and staging
 are in `ChunkTransfer.cs` in the same directory. This is a companion-driver
-protocol, not a NetCode RPC schema. [Admission binding and world ownership](chunk-residency-binding.md)
-are implemented. Automatic transfer routing and replica publication remain pending.
-Binding uses header kinds 1/2; chunk framing uses kinds 16..19. The current bound
-endpoint does not yet accept chunk-transfer traffic.
+protocol, not a NetCode RPC schema. [Admission binding](chunk-residency-binding.md)
+and [automatic streaming/publication](chunk-streaming-implementation.md) are
+implemented. Binding uses header kinds 1/2; transfer framing uses 16..21.
 
 ## Frame encoding
 
@@ -25,7 +24,9 @@ generations, incarnations and revisions are nonzero uint64 values.
 | 16: start | 57 | transfer ID, subscription generation, address, incarnation, revision, int32 encoded length, byte delta flag (0 or 1) |
 | 17: slice | 20 + count | transfer ID, int32 destination offset, int32 count, count payload bytes |
 | 18: applied ACK | 20 | transfer ID, applied revision |
-| 19: eviction | 28 | address, subscription generation |
+| 19: eviction | 28 | address, subscription generation; component API retained, not used by the live stream |
+| 20: interest | 36 | nonzero epoch, anchor address, int32 horizontal radius, int32 vertical radius |
+| 21: resync | 12 | nonzero transfer ID |
 
 Slices contain 1–1,004 bytes. Offsets/counts are checked without overflowing.
 A snapshot declaration permits at most `ChunkWireCodec.MaxSnapshotBytes`
@@ -55,9 +56,17 @@ transfers ownership of its byte array to the caller. It does not publish or ACK.
 `Cancel(id)`, `Cancel(address, generation)` and `Clear()` release staging ownership.
 Address cancellation matches the exact world/address/generation; a stale eviction
 cannot cancel a newer subscription. This class does not keep completed IDs or
-provide a clock. The future stream owner must reject stale/replayed starts, retain
-live subscription identity, impose deadlines and call cancellation on expiry,
-eviction, disconnect or world teardown. IDs must not wrap/reuse within a binding.
+provide a clock. `ChunkStreamingClient` supplies the live epoch, transfer-ID high
+water mark, deadlines and cancellation on expiry/interest replacement/teardown.
+It configures one active reassembly. IDs cannot wrap/reuse within a binding.
+
+The live server sends interest, start and slice frames; clients send applied ACK
+or resync frames. Other role-inappropriate kinds fail the affected channel.
+Interest declarations validate the entire cuboid (at most 256 chunks) before
+allocation. Replacing interest advances its epoch and atomically invalidates all
+old subscriptions, including overlaps; an individual eviction frame is unnecessary
+for this policy. Old-epoch work is ignored; future/out-of-interest declarations
+are invalid. ACKs advance only the exact active completed transfer.
 
 Before publication the owner must decode the payload, compare its identity and
 revision with the declaration, check the current live subscription, and validate
@@ -74,7 +83,9 @@ codec, reassembler and replica storage over IPC and loopback UDP. It exercises a
 snapshot larger than the application queue, queue backpressure, an edit made after
 capture, subsequent delta application, and ACKs after publication.
 
-The integration fixture drives the sequence itself. It is not evidence that
-session admission, interest scheduling, authenticated companion lifecycle,
-loss/latency behavior or multi-peer streaming have been implemented. See
-[implementation progress](chunk-implementation-progress.md) for measured results.
+The original transfer fixture drives the sequence itself. Production-path coverage
+now comes from `ChunkCompanionTests`, `ChunkStreamingTests` and
+`ChunkStreamingScaleTests`: admitted IPC/UDP delivery, late joins, edits in flight,
+interest replacement, invalid/stale traffic, ACK/recovery, blocked-peer isolation,
+32 peers and simulated delay/loss. See the [streaming summary](chunk-streaming-implementation.md)
+for actual evidence, resource limits and measurement caveats.

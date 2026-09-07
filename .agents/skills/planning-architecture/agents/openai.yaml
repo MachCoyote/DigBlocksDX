@@ -1,0 +1,7 @@
+interface:
+  display_name: "Planning Architecture"
+  short_description: "Plan risky cross-boundary changes"
+  default_prompt: "Use $planning-architecture to choose a concise design for this cross-boundary change."
+
+policy:
+  allow_implicit_invocation: true

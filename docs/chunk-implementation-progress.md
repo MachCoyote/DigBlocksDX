@@ -82,25 +82,30 @@ Documentation now reflects the approved independent carrier. The exact framing
 contract and ownership limits are in [chunk transfer protocol](chunk-transfer-protocol.md).
 The assembly map was regenerated and `Test-LeanWorkflow.ps1` passed.
 
-## Remaining implementation
+## September 7, 2026: live interest streaming and replicas
 
-The dependency order, completion criteria and later rendering consultation points
-are detailed in [meshing readiness](chunk-meshing-readiness.md).
+The production companion now connects the existing data components. Server-owned
+bounded interest retains union residency through leases and sends epoch-qualified
+snapshots under rotating peer/global budgets. Client stores validate and publish
+atomically before applied ACKs establish baselines. Bounded delta history catches
+up in-flight edits; missing baselines/history and progress timeout recover with a
+new snapshot. Eviction, reentry and teardown reject obsolete work and release data.
 
-World residency, bounded snapshot workers and admitted companion binding are now
-implemented. Next: interest/subscription scheduling, atomic replica publication,
-ACK/history/resync and independent data readiness, then loss/latency and multi-peer
-streaming measurements.
+Binding, data readiness and playable readiness remain separate. The default is a
+configurable nine-chunk dummy neighborhood. Native `NetworkStreamInGame` remains
+absent. No meshing, generation or persistence was added.
 
-The new milestone implements the user-approved leases and affected-peer failure
-policy, including IPC/UDP binding, compatibility checks, ticket replay protection,
-pending caps/deadlines, rollback and port configuration. Driver disposal now
-flushes UTP disconnect notifications. Fresh checks passed 70/70 EditMode, 43/43
-broad PlayMode and a later overlapping 12/12 companion suite. See the
-[implementation summary](chunk-residency-binding.md) for files, evidence and limits,
-and [research and decisions](chunk-residency-binding-plan.md) for comparisons.
+Fresh isolated source checks passed 108/108 EditMode and 55/55 broad PlayMode,
+including production IPC/UDP runs and measured 32-peer / four-peer delay-loss
+fixtures. A full-project copy compiled successfully. Final focused recovery and
+latest-source compile evidence, numerical resource bounds, file ownership and
+performance caveats are maintained in the [streaming summary](chunk-streaming-implementation.md).
 
-The approved carrier uses IPC for singleplayer and a configurable second UDP port
-for remote peers. Chunk payloads do not use NetCode RPC queues. No new major
-architectural decisions have been made. Release budgets, view distances and
-production timeouts remain subject to measurement and user consultation.
+No asmdef changed in this continuation. Earlier registry/storage/carrier/binding
+results above are historical milestones and should not be summed with these
+broader suites. Unrelated worktree changes are preserved.
+
+The next development milestone is meshing scope selection; see
+[meshing readiness](chunk-meshing-readiness.md). Production view distances,
+adaptive flow control, shared encoding caches and sustained gameplay performance
+remain future tuning work rather than new implementations in this slice.

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DigBlocks.Voxels;
+using DigBlocks.Voxels.Runtime;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.NetCode;
@@ -17,10 +18,8 @@ namespace DigBlocks.Networking.NetCode
     }
 
     [WorldSystemFilter(WorldSystemFilterFlags.ClientSimulation | WorldSystemFilterFlags.ServerSimulation)]
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateAfter(typeof(NetworkReceiveSystemGroup))]
-    [UpdateAfter(typeof(ClientHelloReceiveSystem))]
-    [UpdateAfter(typeof(ServerHelloReceiveSystem))]
+    //admission systems run in the ordinary simulation phase in their respective role worlds.
+    [UpdateInGroup(typeof(SimulationSystemGroup), OrderLast = true)]
     public partial class BulkCompanionSystem : SystemBase
     {
         internal BulkCompanionEndpoint Endpoint;
@@ -61,6 +60,10 @@ namespace DigBlocks.Networking.NetCode
         private readonly List<ulong> removedPeers = new();
         private readonly List<NetworkConnection> removedConnections = new();
         private BulkDriver driver;
+        private readonly ChunkStreamingOptions streamingOptions;
+        private readonly ResidentChunkStore store;
+        private ChunkStreamingServer streamingServer;
+        private ChunkStreamingClient streamingClient;
         private NetworkConnection clientConnection;
         private BulkConnectionOfferRpc? clientOffer;
         private readonly double clientDeadline;
@@ -73,17 +76,33 @@ namespace DigBlocks.Networking.NetCode
         public ushort Port { get; }
         public int BoundPeerCount => bound.Count;
         public int PendingBindingCount => pending.Count;
+        public bool DataReady => !disposed && store.DataReady;
+        public long SentChunkBytes => streamingServer?.SentBytes ?? 0;
+        public long AppliedChunkAcknowledgements => streamingServer?.AppliedAcknowledgements ?? 0;
+        public long SentChunkSnapshots => streamingServer?.SentSnapshots ?? 0;
+        public long SentChunkDeltas => streamingServer?.SentDeltas ?? 0;
+        public double MaxAppliedAckSeconds => streamingServer?.MaxAppliedAckSeconds ?? 0;
+        public int PeakEncodedPayloadBytes => streamingServer?.PeakEncodedPayloadBytes ?? 0;
+        public int PendingChunkPayloads => streamingServer?.PayloadCount ?? 0;
+        public bool SetInterest(ulong id, ChunkAddress anchor, int horizontal, int vertical) =>
+            !disposed && streamingServer != null && peers.TryGetValue(id, out var peer) && Live(Context, id, peer) &&
+            streamingServer.SetInterest(id, anchor, horizontal, vertical, Now);
 
-        public BulkCompanionEndpoint(World world, bool server, bool ipc, ushort port, BlockRegistry registry, double timeout, int maxPending)
+        public BulkCompanionEndpoint(World world, bool server, bool ipc, ushort port, BlockRegistry registry, double timeout, int maxPending, ChunkStreamingOptions streamingOptions)
         {
             this.world = world; this.server = server; this.ipc = ipc; this.registry = registry; this.timeout = timeout; this.maxPending = maxPending;
+            this.streamingOptions = streamingOptions;
+            store = world.GetExistingSystemManaged<ChunkWorldSystem>()?.Store ?? throw new InvalidOperationException("Companion requires a chunk store.");
             var context = Context ?? throw new InvalidOperationException("Companion requires an active NetCode session.");
             if (server)
             {
                 tickets = new BulkTickets(context.Options.Capacity);
                 var endpoint = ipc ? NetworkEndpoint.LoopbackIpv4.WithPort(0) : NetworkEndpoint.Parse(context.Options.BindAddress, port);
-                driver = new BulkDriver(ipc, true, endpoint, Math.Min(1024, context.Options.Capacity + maxPending));
+                driver = new BulkDriver(ipc, true, endpoint, Math.Min(1024, context.Options.Capacity + maxPending), streamingOptions.Simulation);
                 Port = driver.LocalPort; State = ChunkConnectionState.Listening;
+                streamingServer = new ChunkStreamingServer(store, streamingOptions,
+                    (id, packet) => peers.TryGetValue(id, out var peer) && Live(Context, id, peer) && driver.TrySend(peer.Connection, packet),
+                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed));
             }
             else { State = ChunkConnectionState.AwaitingOffer; clientDeadline = Now + timeout; }
         }
@@ -110,7 +129,7 @@ namespace DigBlocks.Networking.NetCode
             clientOffer = offer;
             try
             {
-                driver = new BulkDriver(ipc, false, NetworkEndpoint.LoopbackIpv4.WithPort(0), 1);
+                driver = new BulkDriver(ipc, false, NetworkEndpoint.LoopbackIpv4.WithPort(0), 1, streamingOptions.Simulation);
                 clientConnection = driver.Connect(NetworkEndpoint.Parse(ipc ? "127.0.0.1" : context.Options.Address, offer.Port));
                 State = ChunkConnectionState.Binding;
             }
@@ -132,6 +151,8 @@ namespace DigBlocks.Networking.NetCode
                 if (server) ServerEvent(item);
                 else ClientEvent(item);
             }
+            if (disposed) return;
+            streamingServer?.Tick(Now); streamingClient?.Tick(Now);
             if (disposed || !server) return;
             removedConnections.Clear();
             foreach (var pair in pending) if (Now >= pair.Value) removedConnections.Add(pair.Key);
@@ -194,7 +215,13 @@ namespace DigBlocks.Networking.NetCode
             }
             if (!pending.TryGetValue(item.Connection, out double pendingDeadline))
             {
-                if (bound.TryGetValue(item.Connection, out ulong id)) FailPeer(id, NetworkFailure.ChunkChannelFailed);
+                if (bound.TryGetValue(item.Connection, out ulong id) && peers.TryGetValue(id, out var livePeer) && Live(Context, id, livePeer))
+                {
+                    try { streamingServer.Receive(id, item.Payload, Now); }
+                    catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
+                    { FailPeer(id, NetworkFailure.ChunkChannelFailed); }
+                    return;
+                }
                 driver.Disconnect(item.Connection); return;
             }
             if (Now >= pendingDeadline) { RejectPending(item.Connection); return; }
@@ -213,6 +240,8 @@ namespace DigBlocks.Networking.NetCode
             }
             pending.Remove(item.Connection); peer.Connection = item.Connection; bound.Add(item.Connection, request.PeerId);
             if (!driver.TrySend(item.Connection, BulkBindingFrames.EncodeAccepted(request.PeerId, peer.Generation)))
+            { FailPeer(request.PeerId, NetworkFailure.ChunkChannelFailed); RemovePeer(request.PeerId); return; }
+            if (!streamingServer.Add(request.PeerId, Now))
             { FailPeer(request.PeerId, NetworkFailure.ChunkChannelFailed); RemovePeer(request.PeerId); }
         }
         private void ClientEvent(BulkDriverEvent item)
@@ -226,11 +255,20 @@ namespace DigBlocks.Networking.NetCode
                     new BulkTicket(offer.TicketHigh, offer.TicketLow), ChunkLayout.Edge, registry.Fingerprint)))) FailClient(NetworkFailure.ChunkChannelFailed);
                 return;
             }
+            if (State == ChunkConnectionState.Bound)
+            {
+                try { streamingClient.Receive(item.Payload, Now); }
+                catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
+                { FailClient(NetworkFailure.ChunkChannelFailed); }
+                return;
+            }
             try
             {
                 BulkBindingFrames.DecodeAccepted(item.Payload, out ulong peer, out ulong generation);
                 if (peer != offer.PeerId || generation != offer.Generation) { FailClient(NetworkFailure.InvalidResponse); return; }
                 State = ChunkConnectionState.Bound;
+                streamingClient = new ChunkStreamingClient(store, registry, streamingOptions,
+                    packet => driver.TrySend(clientConnection, packet), () => FailClient(NetworkFailure.ChunkChannelFailed), Now);
             }
             catch (FormatException) { FailClient(NetworkFailure.ChunkChannelFailed); }
         }
@@ -239,7 +277,7 @@ namespace DigBlocks.Networking.NetCode
         { tickets.Revoke(id); if (peers.TryGetValue(id, out var peer)) NetCodeSession.QueueClose(world.EntityManager, peer.Entity, reason); }
         private void RemovePeer(ulong id)
         {
-            tickets.Revoke(id);
+            tickets.Revoke(id); streamingServer?.Remove(id);
             if (!peers.TryGetValue(id, out var peer)) return;
             if (peer.Connection.IsCreated) { bound.Remove(peer.Connection); driver.Disconnect(peer.Connection); }
             peers.Remove(id);
@@ -252,7 +290,7 @@ namespace DigBlocks.Networking.NetCode
         public void Dispose()
         {
             if (disposed) return;
-            disposed = true; driver?.Dispose(); tickets?.Clear(); peers.Clear(); bound.Clear(); pending.Clear();
+            disposed = true; streamingClient?.Dispose(); streamingServer?.Dispose(); driver?.Dispose(); tickets?.Clear(); peers.Clear(); bound.Clear(); pending.Clear();
             if (State != ChunkConnectionState.Faulted) State = ChunkConnectionState.Stopped;
         }
     }

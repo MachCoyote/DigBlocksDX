@@ -75,8 +75,13 @@ and CPU; independent queues do not guarantee latency or throughput.
 
 Keep the established loss/latency and concurrent-control measurements below as
 integration requirements. [Lifecycle and admission binding](chunk-residency-binding.md)
-are implemented and tested with actual IPC/UDP sessions. Automatic streaming
-scheduling and publication remain unfinished.
+are implemented and tested with actual IPC/UDP sessions. Automatic streaming,
+publication and recovery are now implemented; the
+[streaming summary](chunk-streaming-implementation.md) records concrete contracts,
+numerical limits and integrated measurements. The sections below retain broader
+design options: adaptive credits, shared encoding, hysteresis, compression and
+production budget selection are not implemented in this dummy milestone. Fixed
+one-transfer credit and epoch replacement provide its bounds.
 
 ## Configuration and registry agreement
 

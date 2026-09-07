@@ -62,6 +62,45 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(other.SolidAt(0), Is.Zero);
         }
 
+        [Test]
+        public void ReplacementSharesOverlapAndCapacityFailurePreservesExistingLeases()
+        {
+            using var world = new World("Subscription capacity");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 2);
+            var a = new ChunkAddress(1, default); var b = new ChunkAddress(1, new int3(1)); var c = new ChunkAddress(1, new int3(2));
+            Assert.That(store.TryReplaceLeases(Array.Empty<ChunkLease>(), new[] { a, b }, out var first), Is.True);
+            using var shared = store.Acquire(a);
+            ulong incarnation = first[0].Incarnation;
+            Assert.That(store.TryReplaceLeases(first, new[] { b, c }, out var rejected), Is.False);
+            Assert.That(rejected, Is.Null); Assert.That(first[0].Revision, Is.EqualTo(1));
+            shared.Dispose();
+            Assert.That(store.TryReplaceLeases(first, new[] { b, c }, out var moved), Is.True);
+            Assert.That(moved[0], Is.SameAs(first[1])); Assert.That(store.Count, Is.EqualTo(2));
+            Assert.Throws<ObjectDisposedException>(() => first[0].SolidAt(0));
+            Assert.That(store.TryReplaceLeases(moved, new[] { a }, out var returned), Is.True);
+            Assert.That(returned[0].Incarnation, Is.GreaterThan(incarnation));
+            returned[0].Dispose(); Assert.That(store.Count, Is.Zero);
+        }
+
+        [Test]
+        public void HistoryCoalescesExactBaselinesAndFallsBackAfterRetentionOrUnload()
+        {
+            using var world = new World("Delta history");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            using var lease = store.Acquire(default);
+            lease.Apply(new[] { new CellEdit(0, 1, 0) });
+            lease.Apply(new[] { new CellEdit(0, 0, 1), new CellEdit(1, 1, 0) });
+            Assert.That(store.TryGetDelta(lease, 1, out var delta), Is.True);
+            Assert.That(delta.BaseRevision, Is.EqualTo(1)); Assert.That(delta.ResultRevision, Is.EqualTo(3));
+            Assert.That(delta.Updates.Count, Is.EqualTo(2)); Assert.That(delta.Updates[0].Fluid, Is.EqualTo(1));
+            for (int i = 0; i < 9; i++) lease.Apply(new[] { new CellEdit(2, (uint)(i % 2), 0) });
+            Assert.That(store.TryGetDelta(lease, 1, out _), Is.False);
+            Assert.That(store.TryGetDelta(lease, lease.Revision - 1, out _), Is.True);
+            lease.Dispose();
+            using var replacement = store.Acquire(default);
+            Assert.That(store.TryGetDelta(replacement, 1, out _), Is.False);
+        }
+
         [UnityTest]
         public IEnumerator SnapshotSurvivesEditsButNotUnloadAndCapacityIncludesCompletedWork()
         {

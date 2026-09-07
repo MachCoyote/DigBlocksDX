@@ -46,7 +46,14 @@ namespace DigBlocks.Voxels.Runtime
         private readonly List<Pending> snapshots = new();
         private ulong nextIncarnation = 1, nextRequest = 1;
         private bool disposed;
-        private sealed class Entry { public ChunkData Data; public Entity Entity; public int Leases; }
+        private bool replicas;
+        private ChunkInterest interest;
+        private const int HistoryRevisions = 8, HistoryCells = 4096;
+        private sealed class Entry
+        {
+            public ChunkData Data; public Entity Entity; public int Leases, HistoryCellCount;
+            public readonly Queue<ChunkDelta> History = new();
+        }
         private sealed class Pending
         {
             public ulong Id;
@@ -80,25 +87,183 @@ namespace DigBlocks.Voxels.Runtime
         public ChunkLease Acquire(ChunkAddress address)
         {
             RequireAlive();
+            if (replicas) throw new InvalidOperationException("Replica stores cannot acquire authoritative leases.");
             if (!chunks.TryGetValue(address, out var entry))
             {
                 if (chunks.Count >= maxResidents) throw new InvalidOperationException("Resident chunk capacity exhausted.");
-                if (nextIncarnation == ulong.MaxValue) throw new InvalidOperationException("Chunk incarnation space exhausted.");
-                var data = new ChunkData(address, nextIncarnation++);
-                Entity entity = Entity.Null;
-                try
-                {
-                    entity = manager.CreateEntity(typeof(ResidentChunk));
-                    manager.SetComponentData(entity, new ResidentChunk { Address = address, Incarnation = data.Incarnation, Revision = data.Revision });
-                    entry = new Entry { Data = data, Entity = entity };
-                    chunks.Add(address, entry);
-                }
-                catch { data.Dispose(); if (entity != Entity.Null && manager.Exists(entity)) manager.DestroyEntity(entity); throw; }
+                entry = CreateEntry(address);
+                chunks.Add(address, entry);
             }
             if (entry.Leases == int.MaxValue) throw new InvalidOperationException("Residency lease count exhausted.");
             entry.Leases++;
             return new ChunkLease(this, entry.Data, entry.Entity);
         }
+        private Entry CreateEntry(ChunkAddress address)
+        {
+            if (nextIncarnation == ulong.MaxValue) throw new InvalidOperationException("Chunk incarnation space exhausted.");
+            var data = new ChunkData(address, nextIncarnation++);
+            Entity entity = Entity.Null;
+            try
+            {
+                entity = manager.CreateEntity(typeof(ResidentChunk));
+                manager.SetComponentData(entity, new ResidentChunk { Address = address, Incarnation = data.Incarnation, Revision = data.Revision });
+                return new Entry { Data = data, Entity = entity };
+            }
+            catch { data.Dispose(); if (entity != Entity.Null && manager.Exists(entity)) manager.DestroyEntity(entity); throw; }
+        }
+
+        public bool TryReplaceLeases(ChunkLease[] current, ChunkAddress[] wanted, out ChunkLease[] replacement)
+        {
+            RequireAlive(); replacement = null;
+            if (replicas) throw new InvalidOperationException("Replica stores cannot acquire authoritative leases.");
+            if (current == null || wanted == null || current.Length > ChunkInterest.MaximumChunks || wanted.Length > ChunkInterest.MaximumChunks)
+                throw new ArgumentException("Invalid subscription size.");
+            var old = new Dictionary<ChunkAddress, ChunkLease>();
+            foreach (var lease in current) { Validate(lease); old.Add(lease.Address, lease); }
+            var desired = new HashSet<ChunkAddress>(wanted);
+            if (desired.Count != wanted.Length) throw new ArgumentException("Duplicate subscription address.");
+            int finalCount = chunks.Count;
+            foreach (var pair in old)
+                if (!desired.Contains(pair.Key) && chunks[pair.Key].Leases == 1) finalCount--;
+            foreach (var address in wanted)
+            {
+                if (!chunks.TryGetValue(address, out var entry)) finalCount++;
+                else if (!old.ContainsKey(address) && entry.Leases == int.MaxValue) throw new InvalidOperationException("Lease count exhausted.");
+            }
+            if (finalCount > maxResidents) return false;
+            //stage bounded new allocations before releasing old leases; capacity rejection leaves interest untouched.
+            var staged = new Dictionary<ChunkAddress, Entry>();
+            var result = new ChunkLease[wanted.Length];
+            try
+            {
+                for (int i = 0; i < wanted.Length; i++)
+                {
+                    var address = wanted[i];
+                    if (old.TryGetValue(address, out var lease)) { result[i] = lease; continue; }
+                    if (!chunks.TryGetValue(address, out var entry)) { entry = CreateEntry(address); staged.Add(address, entry); }
+                    result[i] = new ChunkLease(this, entry.Data, entry.Entity);
+                }
+            }
+            catch
+            {
+                foreach (var entry in staged.Values) { entry.Data.Dispose(); manager.DestroyEntity(entry.Entity); }
+                throw;
+            }
+            foreach (var pair in old) if (!desired.Contains(pair.Key)) pair.Value.Dispose();
+            foreach (var pair in staged) chunks.Add(pair.Key, pair.Value);
+            for (int i = 0; i < wanted.Length; i++) if (!old.ContainsKey(wanted[i])) chunks[wanted[i]].Leases++;
+            replacement = result;
+            return true;
+        }
+
+        public bool TryGetDelta(ChunkLease lease, ulong baseline, out ChunkDelta delta)
+        {
+            Validate(lease); delta = null;
+            if (baseline == 0 || baseline >= lease.Revision) return false;
+            var updates = new Dictionary<int, ChunkCellUpdate>();
+            ulong revision = baseline;
+            foreach (var item in chunks[lease.Address].History)
+            {
+                if (item.ResultRevision <= revision) continue;
+                if (item.BaseRevision != revision) return false;
+                foreach (var update in item.Updates) updates[update.Index] = update;
+                revision = item.ResultRevision;
+            }
+            if (revision != lease.Revision) return false;
+            var cells = new List<ChunkCellUpdate>(updates.Values);
+            cells.Sort((a, b) => a.Index.CompareTo(b.Index));
+            delta = new ChunkDelta(lease.Address, lease.Incarnation, baseline, revision, cells);
+            return true;
+        }
+
+        public bool DataReady => replicas && interest != null && chunks.Count == interest.Count;
+        public ulong InterestEpoch => interest?.Epoch ?? 0;
+
+        public void EnableReplicas()
+        {
+            RequireAlive();
+            if (chunks.Count != 0 || snapshots.Count != 0) throw new InvalidOperationException("Replica mode requires an empty store.");
+            replicas = true;
+        }
+
+        public bool SetReplicaInterest(ChunkInterest next)
+        {
+            RequireAlive();
+            if (!replicas) throw new InvalidOperationException("Not a replica store.");
+            if (next == null) throw new ArgumentNullException(nameof(next));
+            if (next.Count > maxResidents) throw new ArgumentException("Interest exceeds replica capacity.");
+            if (interest != null && next.Epoch <= interest.Epoch) return false;
+            foreach (var entry in chunks.Values)
+            { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
+            chunks.Clear(); interest = next;
+            return true;
+        }
+
+        public void ClearReplicas()
+        {
+            if (disposed) return;
+            RequireAlive();
+            if (!replicas) throw new InvalidOperationException("Not a replica store.");
+            foreach (var entry in chunks.Values)
+            { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
+            chunks.Clear(); interest = null;
+        }
+
+        public bool PublishReplica(ulong epoch, ChunkImage image)
+        {
+            RequireAlive();
+            if (!replicas) throw new InvalidOperationException("Not a replica store.");
+            if (image == null) throw new ArgumentNullException(nameof(image));
+            if (interest == null || epoch != interest.Epoch || !interest.Contains(image.Address)) return false;
+            chunks.TryGetValue(image.Address, out var previous);
+            if (previous != null && (previous.Data.Incarnation != image.Incarnation || previous.Data.Revision > image.Revision)) return false;
+            for (int i = 0; i < ChunkLayout.Volume; i++)
+            {
+                var solid = registry.GetSolid(image.SolidAt(i)); registry.GetFluid(image.FluidAt(i));
+                if (image.FluidAt(i) != 0 && !solid.PermitsFluid) throw new ArgumentException("Replica solid does not permit fluid.");
+            }
+            if (previous != null && previous.Data.Revision == image.Revision)
+            {
+                for (int i = 0; i < ChunkLayout.Volume; i++)
+                    if (previous.Data.SolidAt(i) != image.SolidAt(i) || previous.Data.FluidAt(i) != image.FluidAt(i))
+                        throw new ArgumentException("Conflicting replica at the published revision.");
+                return true;
+            }
+            //build detached replacement first; failed validation/import leaves the published entity intact.
+            var data = ChunkData.FromChannels(image.Address, image.Incarnation, image.Revision, image.CopySolids(), image.CopyFluids());
+            Entity entity = previous?.Entity ?? Entity.Null;
+            try
+            {
+                if (entity == Entity.Null) entity = manager.CreateEntity(typeof(ResidentChunk));
+                manager.SetComponentData(entity, new ResidentChunk { Address = image.Address, Incarnation = image.Incarnation, Revision = image.Revision });
+                chunks[image.Address] = new Entry { Data = data, Entity = entity };
+            }
+            catch
+            {
+                data.Dispose();
+                if (previous == null && entity != Entity.Null && manager.Exists(entity)) manager.DestroyEntity(entity);
+                throw;
+            }
+            previous?.Data.Dispose();
+            return true;
+        }
+
+        public bool TryCaptureReplica(ChunkAddress address, out ChunkCapture capture)
+        {
+            RequireAlive(); capture = null;
+            if (!replicas || !chunks.TryGetValue(address, out var entry)) return false;
+            capture = entry.Data.Capture(); return true;
+        }
+
+        public bool TryReadReplica(ChunkAddress address, out ChunkImage image)
+        {
+            image = null;
+            if (!TryCaptureReplica(address, out var pending)) return false;
+            using var capture = pending;
+            image = new ChunkImage(address, capture.Incarnation, capture.Revision, capture.CopySolids(), capture.CopyFluids());
+            return true;
+        }
+
         internal void Validate(ChunkLease lease)
         {
             RequireAlive();
@@ -114,7 +279,22 @@ namespace DigBlocks.Voxels.Runtime
                 var solid = registry.GetSolid(edit.Solid); registry.GetFluid(edit.Fluid);
                 if (edit.Fluid != 0 && !solid.PermitsFluid) throw new ArgumentException("Solid state does not permit fluid.", nameof(edits));
             }
+            ulong baseline = lease.Data.Revision;
             lease.Data.Apply(edits, registry.MaxSolidStateId, registry.MaxFluidStateId);
+            if (lease.Data.Revision != baseline)
+            {
+                var entry = chunks[lease.Address];
+                if (edits.Length > HistoryCells) { entry.History.Clear(); entry.HistoryCellCount = 0; }
+                else
+                {
+                    var updates = new ChunkCellUpdate[edits.Length];
+                    for (int i = 0; i < edits.Length; i++) updates[i] = new ChunkCellUpdate(edits[i].Index, edits[i].Solid, edits[i].Fluid);
+                    entry.History.Enqueue(new ChunkDelta(lease.Address, lease.Incarnation, baseline, lease.Data.Revision, updates));
+                    entry.HistoryCellCount += updates.Length;
+                    while (entry.History.Count > HistoryRevisions || entry.HistoryCellCount > HistoryCells)
+                        entry.HistoryCellCount -= entry.History.Dequeue().Updates.Count;
+                }
+            }
             manager.SetComponentData(lease.Entity, new ResidentChunk { Address = lease.Address, Incarnation = lease.Incarnation, Revision = lease.Data.Revision });
         }
         internal void Release(ChunkLease lease)
@@ -179,7 +359,7 @@ namespace DigBlocks.Voxels.Runtime
             return false;
         }
         public void CancelSnapshot(ulong id)
-        { RequireAlive(); foreach (var item in snapshots) if (item.Id == id) item.Cancelled = true; }
+        { if (disposed) return; RequireAlive(); foreach (var item in snapshots) if (item.Id == id) item.Cancelled = true; }
         private bool IsLive(Pending item) => !item.Cancelled && chunks.TryGetValue(item.Address, out var entry) && entry.Data.Incarnation == item.Incarnation;
         private void Retire(int index)
         {

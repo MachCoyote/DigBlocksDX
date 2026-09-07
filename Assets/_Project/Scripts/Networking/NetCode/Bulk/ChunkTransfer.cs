@@ -8,7 +8,7 @@ using Unity.Mathematics;
 
 namespace DigBlocks.Networking.NetCode
 {
-    public enum ChunkFrameKind : byte { Start = 16, Slice = 17, Acknowledgement = 18, Eviction = 19 }
+    public enum ChunkFrameKind : byte { Start = 16, Slice = 17, Acknowledgement = 18, Eviction = 19, Interest = 20, Resync = 21 }
 
     public readonly struct TransferStart
     {
@@ -34,7 +34,7 @@ namespace DigBlocks.Networking.NetCode
         {
             if (packet == null || packet.Length < 4 || packet.Length > BulkDriver.MaxPayloadBytes ||
                 packet[0] != (Magic & 255) || packet[1] != (Magic >> 8) || packet[2] != Version ||
-                packet[3] < (byte)ChunkFrameKind.Start || packet[3] > (byte)ChunkFrameKind.Eviction)
+                packet[3] < (byte)ChunkFrameKind.Start || packet[3] > (byte)ChunkFrameKind.Resync)
                 throw new FormatException("Invalid chunk frame header.");
             return (ChunkFrameKind)packet[3];
         }
@@ -121,6 +121,42 @@ namespace DigBlocks.Networking.NetCode
             using var reader = Open(packet, ChunkFrameKind.Eviction, 28);
             address = ReadAddress(reader); subscriptionGeneration = reader.ReadUInt64();
             if (subscriptionGeneration == 0) throw new FormatException("Invalid subscription generation.");
+        }
+
+        public static byte[] EncodeInterest(ChunkInterest interest)
+        {
+            if (interest == null) throw new ArgumentNullException(nameof(interest));
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            WriteHeader(writer, ChunkFrameKind.Interest);
+            writer.Write(interest.Epoch); WriteAddress(writer, interest.Anchor);
+            writer.Write(interest.HorizontalRadius); writer.Write(interest.VerticalRadius);
+            return stream.ToArray();
+        }
+
+        public static ChunkInterest DecodeInterest(byte[] packet)
+        {
+            using var reader = Open(packet, ChunkFrameKind.Interest, 36);
+            ulong epoch = reader.ReadUInt64(); var anchor = ReadAddress(reader);
+            try { return new ChunkInterest(epoch, anchor, reader.ReadInt32(), reader.ReadInt32()); }
+            catch (ArgumentException exception) { throw new FormatException("Invalid interest declaration.", exception); }
+        }
+
+        public static byte[] EncodeResync(ulong transferId)
+        {
+            if (transferId == 0) throw new ArgumentOutOfRangeException(nameof(transferId));
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            WriteHeader(writer, ChunkFrameKind.Resync); writer.Write(transferId);
+            return stream.ToArray();
+        }
+
+        public static ulong DecodeResync(byte[] packet)
+        {
+            using var reader = Open(packet, ChunkFrameKind.Resync, 12);
+            ulong id = reader.ReadUInt64();
+            if (id == 0) throw new FormatException("Invalid resync identity.");
+            return id;
         }
 
         internal static bool ValidStart(TransferStart start) => start.TransferId != 0 && start.SubscriptionGeneration != 0 &&

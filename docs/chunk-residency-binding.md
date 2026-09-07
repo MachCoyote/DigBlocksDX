@@ -1,5 +1,11 @@
 # World residency and companion binding
 
+This September 6 milestone record is superseded for current runtime behavior by
+[the live streaming summary](chunk-streaming-implementation.md). Interest leases
+now own server dummy residency, client stores publish replicas automatically,
+and `ClientDataReady` is separate from `ClientState`. The original evidence below
+covers residency/binding before live transfer integration.
+
 Implemented September 6, 2026. This completes steps 1 and 2 of the
 [meshing readiness guide](chunk-meshing-readiness.md). The approved choices and
 research comparisons are in the [implementation plan](chunk-residency-binding-plan.md).

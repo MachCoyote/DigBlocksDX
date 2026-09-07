@@ -1,5 +1,6 @@
 using System;
 using DigBlocks.Voxels;
+using DigBlocks.ChunkProtocol;
 using NUnit.Framework;
 using Unity.Mathematics;
 
@@ -37,6 +38,26 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             packet = ChunkTransferFrames.EncodeEviction(Address, 3);
             ChunkTransferFrames.DecodeEviction(packet, out var address, out ulong generation);
             Assert.That(address, Is.EqualTo(Address)); Assert.That(generation, Is.EqualTo(3));
+            packet = ChunkTransferFrames.EncodeInterest(new ChunkInterest(4, Address, 2, 1));
+            var interest = ChunkTransferFrames.DecodeInterest(packet);
+            Assert.That(interest.Epoch, Is.EqualTo(4)); Assert.That(interest.Anchor, Is.EqualTo(Address));
+            Assert.That(interest.Count, Is.EqualTo(75));
+            Assert.That(ChunkTransferFrames.DecodeResync(ChunkTransferFrames.EncodeResync(91)), Is.EqualTo(91));
+        }
+
+        [Test]
+        public void InterestAndResyncRejectMalformedLengthsAndUnboundedDeclarations()
+        {
+            var packet = ChunkTransferFrames.EncodeInterest(new ChunkInterest(1, Address, 1, 0));
+            for (int length = 0; length < packet.Length; length++)
+            {
+                var truncated = new byte[length]; Array.Copy(packet, truncated, length);
+                Assert.Throws<FormatException>(() => ChunkTransferFrames.DecodeInterest(truncated));
+            }
+            Array.Copy(BitConverter.GetBytes(int.MaxValue), 0, packet, 28, 4);
+            Assert.Throws<FormatException>(() => ChunkTransferFrames.DecodeInterest(packet));
+            packet = ChunkTransferFrames.EncodeResync(1); Array.Clear(packet, 4, 8);
+            Assert.Throws<FormatException>(() => ChunkTransferFrames.DecodeResync(packet));
         }
 
         [Test]

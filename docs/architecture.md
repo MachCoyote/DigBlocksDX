@@ -4,6 +4,75 @@
 
 This is the current approved project direction as of September 3, 2026.
 
+## Repository Map
+
+```text
+Assets/_Project/
+├── Scripts/
+│   ├── Core/                 lifecycle, launch, logging, shared primitives
+│   ├── Networking/           transport-independent session/protocol contracts
+│   │   └── NetCode/          Unity NetCode and Transport integration
+│   ├── Client/               client-world coordination and presentation bridges
+│   ├── Server/               authoritative server-world coordination
+│   └── Bootstrap/            Unity entry point and composition root
+└── Tests/
+    ├── EditMode/             fast Core and Bootstrap contract tests
+    └── PlayMode/             scene/bootstrap and multi-world integration tests
+
+Packages/                     Unity package manifest and resolved package lock
+ProjectSettings/              project, rendering, build, and editor configuration
+docs/                         architecture and focused subsystem documentation
+.agents/skills/               selectively triggered repository workflows
+.codex/config.toml            project-local Codex configuration
+tools/                        small deterministic development/validation scripts
+```
+
+`Assets/Plugins/` and other vendor/package content are third-party inputs; edit
+them only when a task explicitly owns that integration. `Library/`, `Temp/`,
+`Logs/`, `obj/`, generated IDE projects, and `.utmp/` are generated or local
+outputs and should not be committed or edited as source.
+
+The checked-in [assembly map](generated/assembly-map.md) is generated from
+`.asmdef` files. It is a compact structural index, not architectural rationale.
+
+## Dependency Direction
+
+```text
+Unity entry / authoring
+          |
+          v
+DigBlocks.Bootstrap --------------------+
+     |             |                    |
+     v             v                    v
+DigBlocks.Client  DigBlocks.Server  DigBlocks.Networking.NetCode
+     |             |                    |
+     +-------------+----------+---------+
+                              v
+                    DigBlocks.Networking
+                              |
+                              v
+                       DigBlocks.Core
+```
+
+Core must not depend on higher layers. Networking owns portable contracts;
+NetCode implements them. Bootstrap may see all runtime assemblies because it is
+the composition root. Client and Server coordinate their worlds but do not own
+transport-specific implementation.
+
+## Where to Look First
+
+| Task | First locations |
+| --- | --- |
+| Launch modes or service lifetime | `Scripts/Core/Launch`, `Scripts/Core/Hosting`, then `Scripts/Bootstrap` |
+| Composition or Unity startup | `Scripts/Bootstrap`, then Bootstrap EditMode/PlayMode tests |
+| Portable network contract or admission policy | `Scripts/Networking`, then `docs/network-session-foundation.md` |
+| Chunk storage, registry, or portable codec | `Scripts/Voxels`, `Scripts/Networking/Chunks`, and their EditMode tests |
+| NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
+| Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
+| Architecture or dependency question | this document, then the generated assembly map and relevant `.asmdef` |
+| Package/API version question | `Packages/manifest.json`, `packages-lock.json`, and `docs/deprecations.md` |
+| Test placement | the matching assembly under `Tests/EditMode`, `Tests/PlayMode`, or NetCode `PlayModeTests` |
+
 ## Technology Direction
 
 DigBlocks uses Unity Entities/ECS as the primary gameplay simulation model and
@@ -53,9 +122,9 @@ presentation and authoring code must be removable from this build.
   systems used by both client and server worlds. They may depend on
   `Unity.Entities` without depending on `Unity.NetCode`.
 
-The existing `ClientRuntime` and `ServerRuntime` services are lifecycle shells.
-They will eventually create, expose, and dispose their respective ECS worlds;
-they are not the location for per-entity gameplay logic.
+`ClientRuntime` and `ServerRuntime` coordinate lifecycle around the native
+session. `NetCodeSession` and `NetCodeWorldFactory` create, expose and dispose
+the separate ECS worlds. Per-entity gameplay logic belongs in ECS systems.
 
 ## Entity Model
 
@@ -78,8 +147,10 @@ The approved [chunk data design](chunk-data-architecture.md) records the 32-cube
 paletted-channel and independent-fluid direction. The companion
 [chunk networking design](chunk-networking-design.md) now uses the approved
 independent Unity Transport companion connection. Storage, registry, codecs,
-carrier, and bounded transfer components are implemented; world residency and
-session streaming integration remain pending. See the
+carrier, bounded transfer components, world residency and admitted companion
+binding, bounded interest streaming, atomic client replica publication and applied
+revision recovery are implemented. The [streaming summary](chunk-streaming-implementation.md)
+records current resource limits, verification and the meshing boundary. See [residency and binding](chunk-residency-binding.md) and the
 [implementation progress](chunk-implementation-progress.md) and
 [transfer protocol](chunk-transfer-protocol.md) for current contracts and evidence.
 The [meshing readiness guide](chunk-meshing-readiness.md) describes the remaining
@@ -115,11 +186,11 @@ for Entities connection. Ghost replication is used for dynamic entities, not as
 a replacement for chunk streaming.
 
 The transport-independent `INetworkSession` contract remains the application
-lifecycle seam. The Netcode adapter will configure and connect the client and
+lifecycle seam. The Netcode adapter configures and connects the client and
 server worlds supplied by the runtime services without exposing Unity transport
 details to the rest of the application.
 
-When the session implementation is added, service registration follows dependency
+Service registration follows dependency
 order and shutdown occurs in reverse:
 
 - Single-player: diagnostics, server world, client world, combined Netcode
@@ -127,7 +198,12 @@ order and shutdown occurs in reverse:
 - Remote client: diagnostics, client world, Netcode client session.
 - Dedicated server: diagnostics, server world, Netcode server session.
 
-The current scaffold stops before constructing the Netcode session.
+The implemented foundation uses native connection approval, persistent unverified
+offline XUIDs, and server-owned capacity reservations. Singleplayer uses private
+IPC; remote clients and dedicated servers use UDP. Admission ends at
+`AwaitingWorldData`, without `NetworkStreamInGame`. See
+[the network foundation guide](network-session-foundation.md) for options,
+ownership, failure handling and the next integration boundary.
 
 ## Performance Rules
 
@@ -142,10 +218,9 @@ The current scaffold stops before constructing the Netcode session.
 
 ## Near-term Sequence
 
-1. Add a minimal Netcode for Entities world/session lifecycle behind
-   `INetworkSession`.
-2. Verify single-player client/server worlds and a remote client can connect to a
-   dedicated server with a protocol-version handshake.
+1. Core bootstrap and service/world lifetime are implemented.
+2. The network admission/session foundation is implemented; see its verification
+   record for tested scenarios and remaining platform limitations.
 3. Design and implement the transport-independent three-dimensional chunk data
    model.
 4. Add chunk interest, snapshot, delta, and transmission systems.

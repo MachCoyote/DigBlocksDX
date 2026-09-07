@@ -47,6 +47,9 @@ namespace DigBlocks.Networking.NetCode
         }
 
         public BulkDriver(bool ipc, bool server, NetworkEndpoint endpoint, int maxConnections = 64)
+            : this(ipc, server, endpoint, maxConnections, null) { }
+
+        internal BulkDriver(bool ipc, bool server, NetworkEndpoint endpoint, int maxConnections, SimulatorUtility.Parameters? simulation)
         {
             if (maxConnections < 1 || maxConnections > 1024) throw new ArgumentOutOfRangeException(nameof(maxConnections));
             this.maxConnections = maxConnections;
@@ -55,6 +58,7 @@ namespace DigBlocks.Networking.NetCode
             try
             {
                 settings.WithReliableStageParameters(windowSize: 64);
+                if (simulation.HasValue) { var parameters = simulation.Value; settings.AddRawParameterStruct(ref parameters); }
                 settings.WithNetworkConfigParameters(sendQueueCapacity: 256, receiveQueueCapacity: 256);
                 driver = ipc ? NetworkDriver.Create(new IPCNetworkInterface(), settings)
                     : NetworkDriver.Create(new UDPNetworkInterface(), settings);
@@ -62,7 +66,9 @@ namespace DigBlocks.Networking.NetCode
             finally { settings.Dispose(); }
             try
             {
-                pipeline = driver.CreatePipeline(typeof(ReliableSequencedPipelineStage));
+                pipeline = simulation.HasValue
+                    ? driver.CreatePipeline(typeof(ReliableSequencedPipelineStage), typeof(SimulatorPipelineStage))
+                    : driver.CreatePipeline(typeof(ReliableSequencedPipelineStage));
                 if (driver.Bind(endpoint) != 0 || (server && driver.Listen() != 0))
                     throw new InvalidOperationException($"Could not bind bulk transport to {endpoint}.");
                 LocalPort = driver.GetLocalEndpoint().Port;

@@ -32,14 +32,100 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             await host.StartAsync(CancellationToken.None);
             Assert.That(bulk.ClientState, Is.EqualTo(ChunkConnectionState.Bound));
             Assert.That(bulk.BoundPeerCount, Is.EqualTo(1)); Assert.That(bulk.ListeningPort, Is.Not.Zero);
-            Assert.That(server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(1));
-            Assert.That(client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.Zero);
+            Assert.That(server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(9));
+            await Until(() => bulk.ClientDataReady);
+            Assert.That(client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(9));
             using (var query = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame))) Assert.That(query.IsEmpty, Is.True);
             Assert.That(session.State, Is.EqualTo(NetworkSessionState.AwaitingWorldData));
             ushort port = bulk.ListeningPort;
             await host.StopAsync(CancellationToken.None);
             Assert.That(server.World, Is.Null); Assert.That(client.World, Is.Null);
             using var replacement = new BulkDriver(true, true, NetworkEndpoint.LoopbackIpv4.WithPort(port));
+        });
+
+        [UnityTest]
+        public IEnumerator IpcStreamingAppliesEditsAndEvictionReentryUnderNewEpoch() => UniTask.ToCoroutine(async () =>
+        {
+            var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
+            var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
+            var session = new NetCodeSession(NetworkSessionRole.ClientAndServer, new NetworkSessionOptions("127.0.0.1", 0, 1), () => client.World, () => server.World, logger, () => 120);
+            var bulk = new ChunkCompanionService(session);
+            await Host(server, client, session, bulk).StartAsync(CancellationToken.None);
+            await Until(() => bulk.ClientDataReady && bulk.AppliedChunkAcknowledgements >= 9);
+            var source = server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            var replica = client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            var address = new ChunkAddress(1, default);
+            ulong incarnation;
+            using (var lease = source.Acquire(address))
+            {
+                incarnation = lease.Incarnation;
+                lease.Apply(new[] { new CellEdit(7, 1, 0), new CellEdit(8, 0, 1) });
+                await Until(() => replica.TryReadReplica(address, out var image) && image.Revision == lease.Revision && bulk.SentChunkDeltas > 0);
+                Assert.That(replica.TryReadReplica(address, out var updated), Is.True);
+                for (int i = 0; i < ChunkLayout.Volume; i++)
+                { Assert.That(updated.SolidAt(i), Is.EqualTo(lease.SolidAt(i))); Assert.That(updated.FluidAt(i), Is.EqualTo(lease.FluidAt(i))); }
+            }
+            Assert.That(bulk.SetServerInterest(session.LocalPeerId, new ChunkAddress(1, new Unity.Mathematics.int3(5)), 0, 0), Is.True);
+            await Until(() => replica.InterestEpoch == 2 && bulk.ClientDataReady);
+            Assert.That(replica.TryReadReplica(address, out _), Is.False); Assert.That(source.Count, Is.EqualTo(1));
+            Assert.That(bulk.SetServerInterest(session.LocalPeerId, address, 0, 0), Is.True);
+            await Until(() => replica.InterestEpoch == 3 && bulk.ClientDataReady);
+            Assert.That(replica.TryReadReplica(address, out var returned), Is.True);
+            Assert.That(returned.Incarnation, Is.GreaterThan(incarnation)); Assert.That(returned.SolidAt(7), Is.Zero);
+            using var query = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame));
+            Assert.That(query.IsEmpty, Is.True);
+        });
+
+        [UnityTest]
+        public IEnumerator UdpLateJoinSharesResidencyAndDisjointInterestReleasesOnlyDepartingPeer() => UniTask.ToCoroutine(async () =>
+        {
+            var bulk = CreateServer(out var session, out var host); await host.StartAsync(CancellationToken.None);
+            var first = CreateClient(session.ListeningPort, 130, null, out var firstSession, out var firstHost);
+            await firstHost.StartAsync(CancellationToken.None); await Until(() => first.ClientDataReady);
+            var source = session.ServerWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            var address = new ChunkAddress(1, default);
+            using var lease = source.Acquire(address);
+            lease.Apply(new[] { new CellEdit(42, 1, 0) });
+            var second = CreateClient(session.ListeningPort, 131, null, out var secondSession, out var secondHost);
+            await secondHost.StartAsync(CancellationToken.None); await Until(() => second.ClientDataReady);
+            var secondReplica = secondSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            Assert.That(secondReplica.TryReadReplica(address, out var late), Is.True);
+            Assert.That(late.Revision, Is.EqualTo(lease.Revision)); Assert.That(late.SolidAt(42), Is.EqualTo(1));
+            Assert.That(source.Count, Is.EqualTo(9));
+            Assert.That(bulk.SetServerInterest(firstSession.LocalPeerId, new ChunkAddress(2, new Unity.Mathematics.int3(-4, 3, -8)), 0, 1), Is.True);
+            var firstReplica = firstSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            await Until(() => firstReplica.InterestEpoch == 2 && first.ClientDataReady);
+            Assert.That(firstReplica.Count, Is.EqualTo(3)); Assert.That(source.Count, Is.EqualTo(12));
+            Assert.That(firstReplica.TryReadReplica(address, out _), Is.False);
+            await firstHost.StopAsync(CancellationToken.None);
+            await Until(() => bulk.BoundPeerCount == 1 && source.Count == 9);
+            Assert.That(second.ClientDataReady, Is.True); Assert.That(secondReplica.TryReadReplica(address, out _), Is.True);
+        });
+
+        [UnityTest]
+        public IEnumerator UdpEditsDuringLargeSnapshotCatchUpAfterAppliedAck() => UniTask.ToCoroutine(async () =>
+        {
+            var runtime = new ServerRuntime(NetCodeWorldFactory.CreateServerWorld);
+            var session = new NetCodeSession(NetworkSessionRole.Server, new NetworkSessionOptions("127.0.0.1", 0, 1, bindAddress: "127.0.0.1"), null, () => runtime.World, logger);
+            var bulk = new ChunkCompanionService(session, 0, streamingOptions: new ChunkStreamingOptions(0, 0, 1024, 1024));
+            await Host(runtime, session, bulk).StartAsync(CancellationToken.None);
+            var source = session.ServerWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            var address = new ChunkAddress(1, default);
+            using var lease = source.Acquire(address);
+            var edits = new CellEdit[ChunkLayout.Volume];
+            for (int i = 0; i < edits.Length; i++) edits[i] = new CellEdit(i, (uint)(i % 2), 0);
+            lease.Apply(edits);
+            var client = CreateClient(session.ListeningPort, 132, null, out var clientSession, out var clientHost);
+            await clientHost.StartAsync(CancellationToken.None);
+            await Until(() => bulk.SentChunkSnapshots > 0);
+            Assert.That(bulk.AppliedChunkAcknowledgements, Is.Zero, "Edit while the captured snapshot is still in flight.");
+            lease.Apply(new[] { new CellEdit(0, 0, 1), new CellEdit(1, 0, 0) });
+            var replica = clientSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            await Until(() => replica.TryReadReplica(address, out var image) && image.Revision == lease.Revision && bulk.AppliedChunkAcknowledgements >= 2);
+            Assert.That(bulk.SentChunkDeltas, Is.GreaterThan(0));
+            replica.TryReadReplica(address, out var final);
+            for (int i = 0; i < ChunkLayout.Volume; i++)
+            { Assert.That(final.SolidAt(i), Is.EqualTo(lease.SolidAt(i))); Assert.That(final.FluidAt(i), Is.EqualTo(lease.FluidAt(i))); }
         });
 
         [UnityTest]
@@ -219,7 +305,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             first.Connect(endpoint);
             await PumpUntil(() => bulk.PendingBindingCount == 1);
             Assert.That(session.Peers.Count, Is.Zero);
-            Assert.That(runtime.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(1));
+            Assert.That(runtime.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.Zero);
         });
 
         [UnityTest]
@@ -331,7 +417,6 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
     [DisableAutoCreation]
     [WorldSystemFilter(WorldSystemFilterFlags.ClientSimulation)]
     [UpdateInGroup(typeof(SimulationSystemGroup))]
-    [UpdateBefore(typeof(BulkCompanionSystem))]
     public partial class BulkOfferProbeSystem : SystemBase
     {
         public BulkConnectionOfferRpc? Offer;

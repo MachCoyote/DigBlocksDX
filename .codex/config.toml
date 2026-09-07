@@ -1,0 +1,5 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+#keep Superpowers installed globally, but use the lean repository workflow here
+[plugins."superpowers@openai-curated-remote"]
+enabled = false

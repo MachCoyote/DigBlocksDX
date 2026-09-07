@@ -1,0 +1,7 @@
+interface:
+  display_name: "Systematic Debugging"
+  short_description: "Find root causes before fixing symptoms"
+  default_prompt: "Use $systematic-debugging to reproduce and isolate this unexpected behavior before fixing it."
+
+policy:
+  allow_implicit_invocation: true
