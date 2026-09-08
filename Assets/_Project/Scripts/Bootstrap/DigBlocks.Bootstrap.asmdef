@@ -9,6 +9,7 @@
     "DigBlocks.Networking",
     "DigBlocks.Networking.NetCode",
     "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Content",
     "UniTask",
     "Unity.Entities",
     "Unity.Collections"

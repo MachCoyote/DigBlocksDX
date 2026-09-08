@@ -3,21 +3,34 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
+using Unity.Collections;
 
 namespace DigBlocks.Voxels
 {
     public sealed class StateDefinition
     {
-        private static readonly Regex ResourceKey = new Regex(@"\A[a-z0-9_.-]+:[a-z0-9_./-]+\z", RegexOptions.CultureInvariant);
-        private static readonly Regex PropertyToken = new Regex(@"\A[a-z0-9_.-]+\z", RegexOptions.CultureInvariant);
         public string Key { get; }
         public string BehaviorKey { get; }
         public string ModelKey { get; }
         public IReadOnlyList<string> Tags { get; }
-        public bool PermitsFluid { get; }
+        public BlockAttributes Attributes { get; }
+        //optional identity slots; null means the state has no block entity, drop table or sound set.
+        public string BlockEntityKey { get; }
+        public string DropsKey { get; }
+        public string SoundSetKey { get; }
+        public bool PermitsFluid => Attributes.PermitsFluid;
+        public bool HasBlockEntity => BlockEntityKey != null;
 
+        //convenience overload for tests and fixtures that only care about identity and fluid compatibility.
         public StateDefinition(string key, string behaviorKey, string modelKey, IEnumerable<string> tags, bool permitsFluid)
+            : this(key, behaviorKey, modelKey, tags, permitsFluid
+                ? BlockAttributes.Default.WithFlags(BlockAttributes.Default.Flags | BlockFlags.PermitsFluid)
+                : BlockAttributes.Default.WithFlags(BlockAttributes.Default.Flags & ~BlockFlags.PermitsFluid))
+        {
+        }
+
+        public StateDefinition(string key, string behaviorKey, string modelKey, IEnumerable<string> tags,
+            BlockAttributes attributes, string blockEntityKey = null, string dropsKey = null, string soundSetKey = null)
         {
             Key = CanonicalKey(key);
             BehaviorKey = ValidateResourceKey(behaviorKey);
@@ -27,14 +40,16 @@ namespace DigBlocks.Voxels
             foreach (string tag in tags)
                 if (!sortedTags.Add(ValidateResourceKey(tag))) throw new ArgumentException("Duplicate tag.", nameof(tags));
             Tags = new List<string>(sortedTags).AsReadOnly();
-            PermitsFluid = permitsFluid;
+            BlockEntityKey = blockEntityKey == null ? null : ValidateResourceKey(blockEntityKey);
+            DropsKey = dropsKey == null ? null : ValidateResourceKey(dropsKey);
+            SoundSetKey = soundSetKey == null ? null : ValidateResourceKey(soundSetKey);
+            bool declaresEntity = attributes.Has(BlockFlags.BlockEntity);
+            if (declaresEntity != HasBlockEntity)
+                throw new ArgumentException("The block-entity flag and block-entity key must agree.", nameof(attributes));
+            Attributes = attributes;
         }
 
-        private static string ValidateResourceKey(string key)
-        {
-            if (key == null || !ResourceKey.IsMatch(key)) throw new ArgumentException("Expected a lowercase namespaced key.", nameof(key));
-            return key;
-        }
+        private static string ValidateResourceKey(string key) => ResourceKeys.Validate(key, nameof(key));
 
         internal static string CanonicalKey(string key)
         {
@@ -47,7 +62,7 @@ namespace DigBlocks.Voxels
             foreach (string property in key.Substring(bracket + 1, key.Length - bracket - 2).Split(','))
             {
                 string[] pair = property.Split('=');
-                if (pair.Length != 2 || !PropertyToken.IsMatch(pair[0]) || !PropertyToken.IsMatch(pair[1]) || properties.ContainsKey(pair[0]))
+                if (pair.Length != 2 || !ResourceKeys.IsPropertyToken(pair[0]) || !ResourceKeys.IsPropertyToken(pair[1]) || properties.ContainsKey(pair[0]))
                     throw new ArgumentException("Invalid or duplicate state property.", nameof(key));
                 properties.Add(pair[0], pair[1]);
             }
@@ -73,7 +88,7 @@ namespace DigBlocks.Voxels
             using var stream = new MemoryStream();
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
-                writer.Write("DigBlocks.Registry.v1");
+                writer.Write("DigBlocks.Registry.v2");
                 WriteChannel(writer, this.solids);
                 WriteChannel(writer, this.fluids);
             }
@@ -103,6 +118,7 @@ namespace DigBlocks.Voxels
             return states;
         }
 
+        //appearance is deliberately absent: a client texture or material difference must never fail binding.
         private static void WriteChannel(BinaryWriter writer, StateDefinition[] states)
         {
             writer.Write(states.Length);
@@ -111,10 +127,43 @@ namespace DigBlocks.Voxels
                 writer.Write(state.Key);
                 writer.Write(state.BehaviorKey);
                 writer.Write(state.ModelKey);
-                writer.Write(state.PermitsFluid);
+                WriteOptional(writer, state.BlockEntityKey);
+                WriteOptional(writer, state.DropsKey);
+                WriteOptional(writer, state.SoundSetKey);
+                var attributes = state.Attributes;
+                writer.Write((uint)attributes.Flags);
+                writer.Write(attributes.Hardness);
+                writer.Write(attributes.BlastResistance);
+                writer.Write(attributes.Friction);
+                writer.Write((byte)attributes.ToolClass);
+                writer.Write(attributes.ToolTier);
+                writer.Write(attributes.LightEmission);
+                writer.Write(attributes.LightAttenuation);
+                writer.Write(attributes.FlammabilityCatch);
+                writer.Write(attributes.FlammabilitySpread);
                 writer.Write(state.Tags.Count);
                 foreach (string tag in state.Tags) writer.Write(tag);
             }
+        }
+
+        //the presence flag keeps an absent key distinct from an empty one in the hash input.
+        private static void WriteOptional(BinaryWriter writer, string value)
+        {
+            writer.Write(value != null);
+            if (value != null) writer.Write(value);
+        }
+
+        //caller-owned; a world should build one table and share its read-only view with jobs.
+        public BlockAttributeTable CreateAttributeTable(Allocator allocator)
+        {
+            return new BlockAttributeTable(BuildAttributes(solids, allocator), BuildAttributes(fluids, allocator));
+        }
+
+        private static NativeArray<BlockAttributes> BuildAttributes(StateDefinition[] states, Allocator allocator)
+        {
+            var attributes = new NativeArray<BlockAttributes>(states.Length, allocator, NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < states.Length; i++) attributes[i] = states[i].Attributes;
+            return attributes;
         }
 
         public uint LookupSolid(string key) => solidIds[StateDefinition.CanonicalKey(key)];
@@ -127,12 +176,15 @@ namespace DigBlocks.Voxels
             return states[id];
         }
 
+        //fixture registry for tests and bootstrap paths that have no content loaded yet.
         public static BlockRegistry CreateDummy()
         {
-            StateDefinition Define(string key, bool permitsFluid = false) =>
-                new StateDefinition(key, "digblocks:static", "digblocks:cube", Array.Empty<string>(), permitsFluid);
-            return new BlockRegistry(new[] { Define("digblocks:air", true), Define("digblocks:stone") },
-                new[] { Define("digblocks:empty"), Define("digblocks:water") });
+            StateDefinition Define(string key, BlockAttributes attributes) =>
+                new StateDefinition(key, "digblocks:static", "digblocks:cube", Array.Empty<string>(), attributes);
+            var water = BlockAttributes.Air.WithFlags(BlockFlags.Replaceable);
+            return new BlockRegistry(
+                new[] { Define("digblocks:air", BlockAttributes.Air), Define("digblocks:stone", BlockAttributes.Default) },
+                new[] { Define("digblocks:empty", BlockAttributes.Air), Define("digblocks:water", water) });
         }
     }
 }

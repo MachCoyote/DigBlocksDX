@@ -1,0 +1,7 @@
+{
+  "key": "digblocks:bedrock",
+  "archetype": "digblocks:rock",
+  "texture": 5,
+  "unbreakable": true,
+  "blastResistance": 3600000.0
+}

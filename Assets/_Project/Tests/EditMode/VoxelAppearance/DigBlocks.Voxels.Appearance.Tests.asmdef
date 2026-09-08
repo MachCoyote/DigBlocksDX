@@ -1,0 +1,14 @@
+{
+  "name": "DigBlocks.Voxels.Appearance.Tests",
+  "references": [
+    "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Appearance",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

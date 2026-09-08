@@ -1,0 +1,11 @@
+{
+  "key": "digblocks:air",
+  "invisible": true,
+  "opaque": false,
+  "fullCube": false,
+  "collides": false,
+  "replaceable": true,
+  "permitsFluid": true,
+  "hardness": 0.0,
+  "blastResistance": 0.0
+}

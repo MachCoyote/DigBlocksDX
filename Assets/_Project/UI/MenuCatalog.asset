@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1e4b2fb0e9477fa4f8b1f6680e8073f0, type: 3}
+  m_Name: MenuCatalog
+  m_EditorClassIdentifier: DigBlocks.Client.UI::DigBlocks.Client.UI.MenuCatalog
+  menus:
+  - menuId: Title
+    prefab: {fileID: 3742441531527917625, guid: 0c5ba403a3994724aba88dbcb8324500, type: 3}
+    layer: 0
+    blocksInteractionUnderneath: 1
+    blocksGameplayInput: 1
+    showsCursor: 1
+    backBehavior: 0
+    retention: 1
+    stretchRootToLayer: 1
+  - menuId: Intro
+    prefab: {fileID: 3742441531527917625, guid: de861560d15300b47a142a3f2affc098, type: 3}
+    layer: 0
+    blocksInteractionUnderneath: 1
+    blocksGameplayInput: 1
+    showsCursor: 1
+    backBehavior: 0
+    retention: 1
+    stretchRootToLayer: 1

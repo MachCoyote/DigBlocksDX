@@ -1,0 +1,15 @@
+{
+  "key": "digblocks:grass_block",
+  "archetype": "digblocks:soil",
+  "textures": {
+    "up": 3,
+    "side": 4,
+    "down": 2
+  },
+  "tints": {
+    "up": "digblocks:grass"
+  },
+  "randomTicks": true,
+  "drops": "digblocks:drop/dirt",
+  "sounds": "digblocks:sound/grass"
+}

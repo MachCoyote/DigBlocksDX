@@ -15,11 +15,13 @@ Assets/_Project/
 │   ├── Client/               client-world coordination, application flow, input
 │   │   └── UI/               menu navigation, menu views, persistent UI root
 │   ├── Server/               authoritative server-world coordination
+│   ├── Voxels/               chunk storage, block definitions, registry, appearance
 │   └── Bootstrap/            Unity entry point and composition root
 └── Tests/
     ├── EditMode/             fast Core and Bootstrap contract tests
     └── PlayMode/             scene/bootstrap and multi-world integration tests
 
+Assets/StreamingAssets/       authored game content loaded at runtime, block definitions included
 Packages/                     Unity package manifest and resolved package lock
 ProjectSettings/              project, rendering, build, and editor configuration
 docs/                         architecture and focused subsystem documentation
@@ -75,6 +77,7 @@ transport-specific implementation.
 | Composition or Unity startup | `Scripts/Bootstrap`, then Bootstrap EditMode/PlayMode tests |
 | Portable network contract or admission policy | `Scripts/Networking`, then `docs/network-session-foundation.md` |
 | Chunk storage, registry, or portable codec | `Scripts/Voxels`, `Scripts/Networking/Chunks`, and their EditMode tests |
+| Block definitions, archetypes, or block content | `Assets/StreamingAssets/content/digblocks`, `Scripts/Voxels/Definitions`, then `docs/block-definitions.md` |
 | NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |

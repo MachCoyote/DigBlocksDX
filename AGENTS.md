@@ -7,7 +7,7 @@ Development direction is user-led; scale implementation to the scope requested.
 ## Start here
 
 * Use [docs/architecture.md](docs/architecture.md) when repository-wide architectural context, subsystem ownership, dependency direction, runtime topology, or task navigation is needed. Do not reread it when the relevant context is already established in the current session.
-* Read focused docs only when relevant. Networking details live in [docs/network-session-foundation.md](docs/network-session-foundation.md), and known API migrations live in [docs/deprecations.md](docs/deprecations.md).
+* Read focused docs only when relevant. Networking details live in [docs/network-session-foundation.md](docs/network-session-foundation.md), block content authoring lives in [docs/block-definitions.md](docs/block-definitions.md), and known API migrations live in [docs/deprecations.md](docs/deprecations.md).
 * Treat `docs/superpowers/specs/` and `docs/superpowers/plans/` as historical design records, not the current default workflow. Read them only when the current task specifically depends on an earlier design decision.
 * Regenerate the machine-derived assembly index with `powershell -File tools/Update-RepositoryMap.ps1` after changing `.asmdef` files. Do not hand-edit `docs/generated/assembly-map.md`.
 * This guide is the canonical agent context for every tool. `CLAUDE.md` only re-exports it for Claude Code; do not add tool-specific instructions there. Workflow skills are authored once under `.agents/skills/<name>/` (Codex reads these plus `agents/openai.yaml`); regenerate the Claude Code mirror under `.claude/skills/` with `pwsh -File tools/Sync-AgentSkills.ps1` after editing any skill.

@@ -18,7 +18,7 @@ Texture2D:
   m_MipsStripped: 0
   m_TextureFormat: 1
   m_MipCount: 1
-  m_IsReadable: 1
+  m_IsReadable: 0
   m_IsPreProcessed: 0
   m_IgnoreMipmapLimit: 1
   m_MipmapLimitGroupName: 
@@ -131,7 +131,7 @@ MonoBehaviour:
     m_StrikethroughThickness: 0.3984375
     m_TabWidth: 8
   m_Material: {fileID: -108313902394093115}
-  m_SourceFontFileGUID: 
+  m_SourceFontFileGUID: 1b93f0727a1b3fe4db39075817732ae9
   m_CreationSettings:
     sourceFontFileName: 
     sourceFontFileGUID: 1b93f0727a1b3fe4db39075817732ae9
@@ -153,7 +153,7 @@ MonoBehaviour:
     includeFontFeatures: 0
   m_SourceFontFile: {fileID: 0}
   m_SourceFontFilePath: 
-  m_AtlasPopulationMode: 1
+  m_AtlasPopulationMode: 0
   InternalDynamicOS: 0
   m_GlyphTable:
   - m_Index: 3

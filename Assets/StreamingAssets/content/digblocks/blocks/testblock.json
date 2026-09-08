@@ -1,0 +1,8 @@
+{
+  "key": "digblocks:testblock",
+  "archetype": "digblocks:solid",
+  "texture": 0,
+  "tags": [
+    "digblocks:debug"
+  ]
+}

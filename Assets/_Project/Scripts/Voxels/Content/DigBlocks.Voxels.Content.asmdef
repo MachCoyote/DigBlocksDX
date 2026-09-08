@@ -1,0 +1,12 @@
+{
+  "name": "DigBlocks.Voxels.Content",
+  "rootNamespace": "DigBlocks.Voxels.Content",
+  "references": [
+    "DigBlocks.Voxels"
+  ],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "allowUnsafeCode": false
+}

@@ -5,7 +5,10 @@
     "DigBlocks.Core",
     "UniTask",
     "Unity.InputSystem",
-    "UnityEngine.UI"
+    "UnityEngine.UI",
+    "Unity.TextMeshPro",
+    "DOTween.Modules",
+    "UniTask.DOTween"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

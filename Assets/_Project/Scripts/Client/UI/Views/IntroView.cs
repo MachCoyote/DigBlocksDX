@@ -74,10 +74,10 @@ namespace DigBlocks.Client.UI.Views
         {
             try
             {
-                //unscaled time so intro presentation never depends on a simulation clock
+                //same clock DOTween drives presentation on, so a startup stall cannot outrun the animation
                 await UniTask.Delay(
                     TimeSpan.FromSeconds(Mathf.Max(0f, presentationSeconds)),
-                    DelayType.UnscaledDeltaTime,
+                    DelayType.DeltaTime,
                     PlayerLoopTiming.Update,
                     cancellationToken);
             }

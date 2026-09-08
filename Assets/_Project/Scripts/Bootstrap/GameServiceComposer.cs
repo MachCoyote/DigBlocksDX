@@ -37,7 +37,7 @@ namespace DigBlocks.Bootstrap
             var session = new NetCodeSession(role, network.Session, client == null ? null : () => client.World,
                 server == null ? null : () => server.World, logger, () => OfflineIdentityStore.LoadOrCreate(network.IdentityPath));
             services.Add(session);
-            services.Add(new ChunkCompanionService(session, network.BulkPort));
+            services.Add(new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry));
             return services;
         }
     }

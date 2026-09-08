@@ -7,6 +7,7 @@ using DigBlocks.Core.Async;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Launch;
 using DigBlocks.Core.Session;
+using UnityEngine;
 
 namespace DigBlocks.Client.Flow
 {
@@ -14,6 +15,11 @@ namespace DigBlocks.Client.Flow
     public sealed class ApplicationFlowController : IMenuViewBinder, IDisposable
     {
         private const float FailureDisplaySeconds = 2.5f;
+
+        //a frame longer than this means the client is still stalling rather than presenting
+        private const float SettledFrameSeconds = 0.05f;
+        private const int SettledFrameCount = 2;
+        private const float SettleTimeoutSeconds = 15f;
 
         private readonly IMenuCoordinator menus;
         private readonly IGameSessionController sessions;
@@ -65,6 +71,11 @@ namespace DigBlocks.Client.Flow
                 if (menus.IsRegistered(MenuIds.Intro))
                 {
                     SetState(ApplicationState.Intro);
+
+                    //the intro is an animation, so it must not open while the client is still
+                    //stalling on its first frames; that spends the budget on a frozen screen
+                    await WaitForSettledFramesAsync(cancellationToken);
+
                     await menus.ShowScreenAsync(MenuIds.Intro, cancellationToken);
                     return;
                 }
@@ -321,6 +332,19 @@ namespace DigBlocks.Client.Flow
             logger.Log($"{State} -> {next}");
             State = next;
             StateChanged?.Invoke(next);
+        }
+
+        //waits for the client to actually start presenting, with a hard cap so startup can never hang on it
+        private static async UniTask WaitForSettledFramesAsync(CancellationToken cancellationToken)
+        {
+            float deadline = Time.realtimeSinceStartup + SettleTimeoutSeconds;
+            int settled = 0;
+
+            while (settled < SettledFrameCount && Time.realtimeSinceStartup < deadline)
+            {
+                await UniTask.NextFrame(PlayerLoopTiming.Update, cancellationToken);
+                settled = Time.unscaledDeltaTime <= SettledFrameSeconds ? settled + 1 : 0;
+            }
         }
 
         private static UniTask DelayAsync(float seconds, CancellationToken cancellationToken)

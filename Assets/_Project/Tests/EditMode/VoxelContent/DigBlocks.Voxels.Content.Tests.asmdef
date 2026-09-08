@@ -1,0 +1,14 @@
+{
+  "name": "DigBlocks.Voxels.Content.Tests",
+  "references": [
+    "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Content",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "DigBlocks.Voxels.Appearance",
+  "rootNamespace": "DigBlocks.Voxels.Appearance",
+  "references": [
+    "DigBlocks.Voxels",
+    "Unity.Collections",
+    "Unity.Mathematics",
+    "Unity.Burst"
+  ],
+  "allowUnsafeCode": false
+}

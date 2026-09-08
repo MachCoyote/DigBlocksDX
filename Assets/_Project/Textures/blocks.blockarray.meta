@@ -1,0 +1,21 @@
+fileFormatVersion: 2
+guid: 9011223344556677889900112233445b
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+  script: {fileID: 11500000, guid: 11223344556677889900112233445566, type: 3}
+  sourceTexture: {fileID: 2800000, guid: a8eb37e3c2efd704f8753e246889a32c, type: 3}
+  tileSize: 16
+  mipCount: 0
+  sRGB: 1
+  filterMode: 0
+  wrapMode: 0
+  anisoLevel: 0
+  sliceOrder: 0
+  dilateAlpha: 0
+  dilatePasses: 4
+  cpuReadable: 0

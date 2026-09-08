@@ -149,6 +149,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: DigBlocks.Bootstrap::DigBlocks.Bootstrap.DigBlocksBootstrap
   defaultLaunchMode: 0
+  menuCatalog: {fileID: 11400000, guid: 560c3d6b2c2ca1242a29279f2117010f, type: 2}
+  uiRootPrefab: {fileID: 0}
+  developmentWorldId: dev
 --- !u!4 &69007442
 Transform:
   m_ObjectHideFlags: 0

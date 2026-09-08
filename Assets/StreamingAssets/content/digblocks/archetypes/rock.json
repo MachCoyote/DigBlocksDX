@@ -1,0 +1,12 @@
+{
+  "key": "digblocks:rock",
+  "archetype": "digblocks:solid",
+  "hardness": 1.5,
+  "blastResistance": 6.0,
+  "tool": "pickaxe",
+  "requiresTool": true,
+  "sounds": "digblocks:sound/stone",
+  "tags": [
+    "digblocks:rock"
+  ]
+}

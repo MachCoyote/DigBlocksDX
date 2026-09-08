@@ -1,0 +1,21 @@
+{
+  "name": "DigBlocks.Client.Rendering.Editor.Tests",
+  "rootNamespace": "DigBlocks.Client.Rendering.Editor.Tests",
+  "references": [
+    "DigBlocks.Client.Rendering.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
