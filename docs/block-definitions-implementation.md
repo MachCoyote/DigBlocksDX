@@ -74,20 +74,28 @@ Tests: `Tests/EditMode/Voxels/BlockContentCompilerTests.cs`,
 
 ## Verification
 
-- Full EditMode run: 97 passed, 0 failed, 0 skipped.
-- `DigBlocks.Voxels`, `DigBlocks.Voxels.Content`, `DigBlocks.Voxels.Appearance`
-  and their three test assemblies all compile clean.
+- EditMode: 129 passed, 0 failed, 0 skipped, across every EditMode assembly.
+- Every runtime and test assembly compiles clean, `DigBlocks.Bootstrap` included,
+  so the `GameServiceComposer` switch from `BlockRegistry.CreateDummy()` to the
+  compiled registry is exercised by `GameServiceComposerTests`.
 - `tools/Test-LeanWorkflow.ps1` passes; `docs/generated/assembly-map.md` regenerated.
 
-Not verified: `DigBlocks.Bootstrap` did not build during this milestone, so the
-`GameServiceComposer` change from `BlockRegistry.CreateDummy()` to the compiled
-registry is unexercised. `DigBlocks.Client.UI` fails to compile because it
-references a `DOTween.Modules` assembly definition that is not present in the
-worktree, which makes `Image.DOColor` resolve to the `Camera` overload; Bootstrap
-depends on Client.UI and is skipped in turn. That is unrelated in-progress UI work
-and was deliberately left untouched. PlayMode tests were not run for the same
-reason, so the fingerprint bump has not been exercised against live companion
-binding.
+One recovery was needed to reach that state. The DOTween modules assembly
+definition had been deleted from the worktree while untracked, which dropped the
+DOTween module sources into the default assembly, made `Image.DOColor`
+unresolvable from `DigBlocks.Client.UI`, and skipped every assembly downstream
+of it. It was reconstructed from `DOTween.Modules.csproj`,
+which had been generated while the file still existed and records the assembly
+name, the `DOTween.dll` precompiled reference, the `Unity.TextMeshPro` and
+`UnityEngine.UI` references and the nine compiled module sources. Regenerating it
+from DOTween's own utility panel produces the same file.
+
+Not verified: PlayMode tests. They fail to initialize through the Unity MCP
+bridge, reporting no started tests after both a 120-second and a 300-second
+initialization timeout, so this is an editor-automation failure rather than a test
+failure. The `v2` fingerprint has therefore not been exercised against live
+companion binding; run the PlayMode suite from the CLI with the editor closed to
+close that gap.
 
 ## Next
 
