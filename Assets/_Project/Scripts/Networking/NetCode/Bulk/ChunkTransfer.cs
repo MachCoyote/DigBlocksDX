@@ -8,7 +8,10 @@ using Unity.Mathematics;
 
 namespace DigBlocks.Networking.NetCode
 {
-    public enum ChunkFrameKind : byte { Start = 16, Slice = 17, Acknowledgement = 18, Eviction = 19, Interest = 20, Resync = 21 }
+    public enum ChunkFrameKind : byte
+    {
+        Start = 16, Slice = 17, Acknowledgement = 18, Eviction = 19, Interest = 20, Resync = 21, InterestRequest = 22
+    }
 
     public readonly struct TransferStart
     {
@@ -34,7 +37,7 @@ namespace DigBlocks.Networking.NetCode
         {
             if (packet == null || packet.Length < 4 || packet.Length > BulkDriver.MaxPayloadBytes ||
                 packet[0] != (Magic & 255) || packet[1] != (Magic >> 8) || packet[2] != Version ||
-                packet[3] < (byte)ChunkFrameKind.Start || packet[3] > (byte)ChunkFrameKind.Resync)
+                packet[3] < (byte)ChunkFrameKind.Start || packet[3] > (byte)ChunkFrameKind.InterestRequest)
                 throw new FormatException("Invalid chunk frame header.");
             return (ChunkFrameKind)packet[3];
         }
@@ -157,6 +160,21 @@ namespace DigBlocks.Networking.NetCode
             ulong id = reader.ReadUInt64();
             if (id == 0) throw new FormatException("Invalid resync identity.");
             return id;
+        }
+
+        public static byte[] EncodeInterestRequest(ChunkAddress anchor)
+        {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            WriteHeader(writer, ChunkFrameKind.InterestRequest);
+            WriteAddress(writer, anchor);
+            return stream.ToArray();
+        }
+
+        public static ChunkAddress DecodeInterestRequest(byte[] packet)
+        {
+            using var reader = Open(packet, ChunkFrameKind.InterestRequest, 20);
+            return ReadAddress(reader);
         }
 
         internal static bool ValidStart(TransferStart start) => start.TransferId != 0 && start.SubscriptionGeneration != 0 &&

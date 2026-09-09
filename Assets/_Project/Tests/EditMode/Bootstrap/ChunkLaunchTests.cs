@@ -2,11 +2,25 @@ using System;
 using System.IO;
 using DigBlocks.Core.Launch;
 using DigBlocks.Networking;
+using DigBlocks.Networking.NetCode;
 using NUnit.Framework;
+using UnityEngine;
 namespace DigBlocks.Bootstrap.Tests
 {
     public sealed class ChunkLaunchTests
     {
+        [Test]
+        public void AuthoredChunkDistancesCreateIndependentThreeDimensionalInterest()
+        {
+            var settings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
+            Assert.That(settings, Is.Not.Null);
+            var options = settings.CreateOptions();
+            Assert.That(options.HorizontalRadius, Is.EqualTo(2));
+            Assert.That(options.VerticalRadius, Is.EqualTo(1));
+            Assert.That((2 * options.HorizontalRadius + 1) * (2 * options.HorizontalRadius + 1) *
+                (2 * options.VerticalRadius + 1), Is.EqualTo(75));
+        }
+
         [Test]
         public void DedicatedServerDerivesOrOverridesBulkPort()
         {

@@ -7,6 +7,7 @@ using DigBlocks.Core.Launch;
 using DigBlocks.Networking;
 using DigBlocks.Networking.NetCode;
 using DigBlocks.Server.Runtime;
+using DigBlocks.Voxels.Runtime;
 using UnityEngine;
 
 namespace DigBlocks.Bootstrap
@@ -16,7 +17,8 @@ namespace DigBlocks.Bootstrap
         public static IReadOnlyList<IGameService> Compose(LaunchOptions launchOptions, IGameLogger logger)
             => Compose(launchOptions, logger, NetworkLaunchSettings.Parse(Array.Empty<string>(), launchOptions.Mode, Application.persistentDataPath));
 
-        public static IReadOnlyList<IGameService> Compose(LaunchOptions launchOptions, IGameLogger logger, NetworkLaunchSettings network)
+        public static IReadOnlyList<IGameService> Compose(LaunchOptions launchOptions, IGameLogger logger, NetworkLaunchSettings network,
+            IAuthoritativeChunkSource authoritativeChunkSource = null)
         {
             if (!Enum.IsDefined(typeof(LaunchMode), launchOptions.Mode)) throw new ArgumentOutOfRangeException(nameof(launchOptions));
             bool local = launchOptions.Mode == LaunchMode.SinglePlayer;
@@ -37,7 +39,10 @@ namespace DigBlocks.Bootstrap
             var session = new NetCodeSession(role, network.Session, client == null ? null : () => client.World,
                 server == null ? null : () => server.World, logger, () => OfflineIdentityStore.LoadOrCreate(network.IdentityPath));
             services.Add(session);
-            services.Add(new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry));
+            var streamingSettings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
+            var streamingOptions = streamingSettings != null ? streamingSettings.CreateOptions() : new ChunkStreamingOptions();
+            services.Add(new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry,
+                streamingOptions: streamingOptions, authoritativeSource: authoritativeChunkSource));
             return services;
         }
     }

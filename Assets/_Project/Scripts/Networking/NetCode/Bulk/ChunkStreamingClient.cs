@@ -1,5 +1,6 @@
 using System;
 using DigBlocks.ChunkProtocol;
+using DigBlocks.Voxels;
 using DigBlocks.Voxels.Runtime;
 
 namespace DigBlocks.Networking.NetCode
@@ -16,6 +17,7 @@ namespace DigBlocks.Networking.NetCode
         private TransferStart active;
         private ulong highestTransfer;
         private byte[] response;
+        private byte[] interestRequest;
         private double deadline;
         private int retries;
         private bool disposed;
@@ -24,6 +26,14 @@ namespace DigBlocks.Networking.NetCode
         {
             this.store = store; maxSolid = registry.MaxSolidStateId; maxFluid = registry.MaxFluidStateId; this.options = options;
             this.send = send; this.fail = fail; deadline = now + options.ProgressTimeout;
+        }
+
+        public bool RequestInterest(ChunkAddress anchor)
+        {
+            if (disposed || anchor.World != options.WorldId) return false;
+            if (interestRequest == null && interest != null && interest.Anchor.Equals(anchor)) return true;
+            interestRequest = ChunkTransferFrames.EncodeInterestRequest(anchor);
+            return true;
         }
 
         public void Receive(byte[] packet, double now)
@@ -99,6 +109,8 @@ namespace DigBlocks.Networking.NetCode
         {
             if (disposed) return;
             if (response != null && send(response)) { response = null; deadline = now + options.ProgressTimeout; }
+            if (response == null && interestRequest != null && send(interestRequest))
+            { interestRequest = null; deadline = now + options.ProgressTimeout; }
             if (now < deadline) return;
             if (active.TransferId != 0) RequestResync(active.TransferId, now);
             else if (response != null || interest == null || !store.DataReady) fail();
@@ -106,7 +118,7 @@ namespace DigBlocks.Networking.NetCode
         public void Dispose()
         {
             if (disposed) return;
-            assembler.Clear(); response = null; store.ClearReplicas(); disposed = true;
+            assembler.Clear(); response = null; interestRequest = null; store.ClearReplicas(); disposed = true;
         }
     }
 }

@@ -3,7 +3,9 @@
 This slice owns connection admission and lifetime. It deliberately stops at
 `AwaitingWorldData`: no player ghosts or `NetworkStreamInGame` are created.
 The session also starts the [chunk companion service](chunk-residency-binding.md),
-which owns separate stores, pins one server dummy chunk and waits for binding.
+which owns separate client/server stores, manages moving per-peer interest, and waits
+for binding. The current residency and sample-content path is detailed in the
+[dynamic chunk loading implementation summary](dynamic-chunk-loading.md).
 Dedicated servers can set `--bulk-port` (default game port + 1); clients use the
 advertised port, and singleplayer uses IPC. Inspect
 `DigBlocksBootstrap.ChunkCompanion.ClientState` for binding progress.

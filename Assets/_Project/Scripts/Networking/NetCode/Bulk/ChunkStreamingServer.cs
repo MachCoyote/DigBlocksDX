@@ -15,16 +15,19 @@ namespace DigBlocks.Networking.NetCode
         public int PeerBytesPerTick { get; }
         public int MaxPayloads { get; }
         public double ProgressTimeout { get; }
+        public uint WorldId { get; }
         public ChunkStreamingOptions(int horizontalRadius = 1, int verticalRadius = 0,
-            int globalBytesPerTick = 16384, int peerBytesPerTick = 4096, int maxPayloads = 4, double progressTimeout = 10)
+            int globalBytesPerTick = 16384, int peerBytesPerTick = 4096, int maxPayloads = 4, double progressTimeout = 10,
+            uint worldId = 1)
         {
-            _ = new ChunkInterest(1, new ChunkAddress(1, default), horizontalRadius, verticalRadius);
+            if (worldId == 0) throw new ArgumentOutOfRangeException(nameof(worldId));
+            _ = new ChunkInterest(1, new ChunkAddress(worldId, default), horizontalRadius, verticalRadius);
             if (globalBytesPerTick < BulkDriver.MaxPayloadBytes || globalBytesPerTick > 1048576) throw new ArgumentOutOfRangeException(nameof(globalBytesPerTick));
             if (peerBytesPerTick < BulkDriver.MaxPayloadBytes || peerBytesPerTick > globalBytesPerTick) throw new ArgumentOutOfRangeException(nameof(peerBytesPerTick));
             if (maxPayloads < 2 || maxPayloads > 16) throw new ArgumentOutOfRangeException(nameof(maxPayloads));
             if (!(progressTimeout >= 1 && progressTimeout <= 120)) throw new ArgumentOutOfRangeException(nameof(progressTimeout));
             HorizontalRadius = horizontalRadius; VerticalRadius = verticalRadius; GlobalBytesPerTick = globalBytesPerTick;
-            PeerBytesPerTick = peerBytesPerTick; MaxPayloads = maxPayloads; ProgressTimeout = progressTimeout;
+            PeerBytesPerTick = peerBytesPerTick; MaxPayloads = maxPayloads; ProgressTimeout = progressTimeout; WorldId = worldId;
         }
     }
 
@@ -34,6 +37,7 @@ namespace DigBlocks.Networking.NetCode
         private readonly ChunkStreamingOptions options;
         private readonly Func<ulong, byte[], bool> send;
         private readonly Action<ulong> fail;
+        private readonly IAuthoritativeChunkSource source;
         private readonly Dictionary<ulong, Peer> peers = new();
         private readonly List<ulong> order = new();
         private readonly Dictionary<ulong, Peer> requests = new();
@@ -64,13 +68,14 @@ namespace DigBlocks.Networking.NetCode
             public double Deadline, TransferBegan;
         }
 
-        public ChunkStreamingServer(ResidentChunkStore store, ChunkStreamingOptions options, Func<ulong, byte[], bool> send, Action<ulong> fail)
-        { this.store = store; this.options = options; this.send = send; this.fail = fail; }
+        public ChunkStreamingServer(ResidentChunkStore store, ChunkStreamingOptions options, Func<ulong, byte[], bool> send, Action<ulong> fail,
+            IAuthoritativeChunkSource source = null)
+        { this.store = store; this.options = options; this.send = send; this.fail = fail; this.source = source; }
 
         public bool Add(ulong id, double now)
         {
             var peer = new Peer { Id = id };
-            if (!SetInterest(peer, new ChunkAddress(1, default), options.HorizontalRadius, options.VerticalRadius, now)) return false;
+            if (!SetInterest(peer, new ChunkAddress(options.WorldId, default), options.HorizontalRadius, options.VerticalRadius, now)) return false;
             peers.Add(id, peer); order.Add(id); return true;
         }
 
@@ -80,10 +85,15 @@ namespace DigBlocks.Networking.NetCode
         private bool SetInterest(Peer peer, ChunkAddress anchor, int horizontal, int vertical, double now)
         {
             if (peer.Failed) return false;
+            if (peer.Interest != null && peer.Interest.Anchor.Equals(anchor) && peer.Interest.HorizontalRadius == horizontal &&
+                peer.Interest.VerticalRadius == vertical) return true;
             var interest = new ChunkInterest(checked((peer.Interest?.Epoch ?? 0) + 1), anchor, horizontal, vertical);
+            var retainedBaselines = new Dictionary<ChunkAddress, ulong>();
+            for (int i = 0; i < peer.Leases.Length; i++) retainedBaselines.Add(peer.Leases[i].Address, peer.Baselines[i]);
             if (!store.TryReplaceLeases(peer.Leases, interest.Addresses(), out var leases)) return false;
             CancelTransfer(peer);
             peer.Interest = interest; peer.Leases = leases; peer.Baselines = new ulong[leases.Length];
+            for (int i = 0; i < leases.Length; i++) retainedBaselines.TryGetValue(leases[i].Address, out peer.Baselines[i]);
             peer.Declaration = ChunkTransferFrames.EncodeInterest(interest); peer.Index = 0; peer.Retries = 0;
             peer.Deadline = now + options.ProgressTimeout;
             return true;
@@ -94,6 +104,14 @@ namespace DigBlocks.Networking.NetCode
             if (!peers.TryGetValue(id, out var peer)) throw new FormatException("No live streaming peer.");
             if (peer.Failed) return;
             var kind = ChunkTransferFrames.ReadKind(packet);
+            if (kind == ChunkFrameKind.InterestRequest)
+            {
+                var anchor = ChunkTransferFrames.DecodeInterestRequest(packet);
+                if (anchor.World != options.WorldId) throw new ArgumentException("Client interest requested the wrong world.", nameof(packet));
+                if (!SetInterest(peer, anchor, options.HorizontalRadius, options.VerticalRadius, now))
+                    throw new InvalidOperationException("Server chunk residency capacity exhausted.");
+                return;
+            }
             ulong transfer;
             if (kind == ChunkFrameKind.Acknowledgement)
             {
@@ -152,6 +170,7 @@ namespace DigBlocks.Networking.NetCode
                     var lease = peer.Leases[peer.Index];
                     if (peer.Baselines[peer.Index] != lease.Revision)
                     {
+                        store.EnsureLoaded(lease, source);
                         if (store.TryGetDelta(lease, peer.Baselines[peer.Index], out var delta))
                             Prepare(peer, ChunkWireCodec.EncodeDelta(delta), delta.ResultRevision, true, now);
                         else if (store.TryRequestSnapshot(lease, out ulong request))

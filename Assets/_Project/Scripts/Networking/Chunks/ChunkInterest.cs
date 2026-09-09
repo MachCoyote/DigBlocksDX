@@ -44,16 +44,32 @@ namespace DigBlocks.ChunkProtocol
         {
             var result = new ChunkAddress[Count];
             int index = 0;
-            //origin first makes the dummy anchor usable before its neighbors finish.
-            result[index++] = Anchor;
             for (int y = -VerticalRadius; y <= VerticalRadius; y++)
             for (int z = -HorizontalRadius; z <= HorizontalRadius; z++)
             for (int x = -HorizontalRadius; x <= HorizontalRadius; x++)
-            {
-                if (x == 0 && y == 0 && z == 0) continue;
                 result[index++] = new ChunkAddress(Anchor.World, Anchor.Position + new int3(x, y, z));
-            }
+            Array.Sort(result, CompareDistance);
             return result;
+        }
+
+        private int CompareDistance(ChunkAddress left, ChunkAddress right)
+        {
+            long leftDistance = SquaredDistance(left.Position);
+            long rightDistance = SquaredDistance(right.Position);
+            int order = leftDistance.CompareTo(rightDistance);
+            if (order != 0) return order;
+            order = left.Position.y.CompareTo(right.Position.y);
+            if (order != 0) return order;
+            order = left.Position.z.CompareTo(right.Position.z);
+            return order != 0 ? order : left.Position.x.CompareTo(right.Position.x);
+        }
+
+        private long SquaredDistance(int3 position)
+        {
+            long x = (long)position.x - Anchor.Position.x;
+            long y = (long)position.y - Anchor.Position.y;
+            long z = (long)position.z - Anchor.Position.z;
+            return x * x + y * y + z * z;
         }
     }
 }

@@ -79,6 +79,105 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(store.DataReady, Is.True);
         }
 
+        [Test]
+        public void ClientAnchorRequestUsesServerOwnedDistancesAndRejectsAnotherWorld()
+        {
+            using var serverWorld = new World("Moving interest source");
+            using var clientWorld = new World("Moving interest requester");
+            var registry = BlockRegistry.CreateDummy();
+            var store = serverWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry);
+            var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry); replica.EnableReplicas();
+            var serverPackets = new List<byte[]>(); var clientPackets = new List<byte[]>();
+            var options = new ChunkStreamingOptions(1, 0);
+            using var server = new ChunkStreamingServer(store, options, (_, packet) => { serverPackets.Add(packet); return true; }, _ => Assert.Fail());
+            using var client = new ChunkStreamingClient(replica, registry, options, packet => { clientPackets.Add(packet); return true; }, () => Assert.Fail(), 0);
+            Assert.That(server.Add(1, 0), Is.True);
+            var requested = new ChunkAddress(1, new int3(-3, 2, 5));
+            Assert.That(client.RequestInterest(requested), Is.True);
+            client.Tick(0);
+            Assert.That(clientPackets.Count, Is.EqualTo(1));
+            Assert.That(ChunkTransferFrames.ReadKind(clientPackets[0]), Is.EqualTo(ChunkFrameKind.InterestRequest));
+            server.Receive(1, clientPackets[0], 0);
+            Assert.That(store.Count, Is.EqualTo(9));
+            server.Tick(0);
+            var declaration = ChunkTransferFrames.DecodeInterest(serverPackets.Find(packet => ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Interest));
+            Assert.That(declaration.Anchor, Is.EqualTo(requested));
+            Assert.That(declaration.HorizontalRadius, Is.EqualTo(1));
+            Assert.That(declaration.VerticalRadius, Is.Zero);
+            Assert.That(client.RequestInterest(new ChunkAddress(2, default)), Is.False);
+            Assert.Throws<ArgumentException>(() => server.Receive(1,
+                ChunkTransferFrames.EncodeInterestRequest(new ChunkAddress(2, default)), 0));
+        }
+
+        [UnityTest]
+        public IEnumerator MovingOneChunkRetainsSixReplicasAndStreamsOnlyThreeNewSnapshots()
+        {
+            using var serverWorld = new World("Moving source");
+            using var clientWorld = new World("Moving replica");
+            var registry = BlockRegistry.CreateDummy();
+            var store = serverWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry);
+            var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry); replica.EnableReplicas();
+            var inbound = new Queue<byte[]>(); var replies = new Queue<byte[]>(); var starts = new List<ChunkAddress>();
+            var options = new ChunkStreamingOptions(1, 0);
+            using var server = new ChunkStreamingServer(store, options, (_, packet) =>
+            {
+                if (ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Start) starts.Add(ChunkTransferFrames.DecodeStart(packet).Address);
+                inbound.Enqueue(packet); return true;
+            }, _ => Assert.Fail());
+            using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail(), 0);
+            Assert.That(server.Add(1, 0), Is.True);
+            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < 9; tick++)
+            {
+                server.Tick(tick * 0.01);
+                while (inbound.Count != 0) client.Receive(inbound.Dequeue(), tick * 0.01);
+                client.Tick(tick * 0.01);
+                while (replies.Count != 0) server.Receive(1, replies.Dequeue(), tick * 0.01);
+                yield return null;
+            }
+            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(9));
+            AssertRadial(starts, Address);
+            var retainedAddress = new ChunkAddress(1, new int3(0, 0, 0));
+            Assert.That(replica.TryGetReplicaStamp(retainedAddress, out var retained), Is.True);
+
+            starts.Clear();
+            Assert.That(client.RequestInterest(new ChunkAddress(1, new int3(1, 0, 0))), Is.True);
+            client.Tick(6);
+            while (replies.Count != 0) server.Receive(1, replies.Dequeue(), 6);
+            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < 12; tick++)
+            {
+                double now = 6 + tick * 0.01;
+                server.Tick(now);
+                while (inbound.Count != 0) client.Receive(inbound.Dequeue(), now);
+                client.Tick(now);
+                while (replies.Count != 0) server.Receive(1, replies.Dequeue(), now);
+                yield return null;
+            }
+
+            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(12));
+            Assert.That(server.SentSnapshots, Is.EqualTo(12));
+            Assert.That(store.Count, Is.EqualTo(9)); Assert.That(replica.Count, Is.EqualTo(9));
+            Assert.That(replica.DataReady, Is.True);
+            Assert.That(replica.TryGetReplicaStamp(retainedAddress, out var after), Is.True);
+            Assert.That(after.Incarnation, Is.EqualTo(retained.Incarnation));
+            Assert.That(replica.TryGetReplicaStamp(new ChunkAddress(1, new int3(-1, 0, 0)), out _), Is.False);
+            Assert.That(starts.Count, Is.EqualTo(3));
+            AssertRadial(starts, new ChunkAddress(1, new int3(1, 0, 0)));
+        }
+
+        private static void AssertRadial(IReadOnlyList<ChunkAddress> addresses, ChunkAddress anchor)
+        {
+            long previous = -1;
+            foreach (var address in addresses)
+            {
+                long x = (long)address.Position.x - anchor.Position.x;
+                long y = (long)address.Position.y - anchor.Position.y;
+                long z = (long)address.Position.z - anchor.Position.z;
+                long distance = x * x + y * y + z * z;
+                Assert.That(distance, Is.GreaterThanOrEqualTo(previous));
+                previous = distance;
+            }
+        }
+
         [UnityTest]
         public IEnumerator LostAppliedAckRetriesSnapshotAndLateAckCannotAdvanceTheReplacement()
         {

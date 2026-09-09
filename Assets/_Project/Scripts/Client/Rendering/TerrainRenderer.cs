@@ -306,6 +306,12 @@ namespace DigBlocks.Client.Rendering
             CameraVisibleQuads = 0; CameraVisibleChunks = 0; GraphCulledChunks = 0;
         }
 
+        public void Remove(uint slot)
+        {
+            Replace(slot, int3.zero, null);
+            occlusionGraph.RemoveNode((int)slot);
+        }
+
         public void SetGraphReady(bool ready) => occlusionGraph.SetReady(ready);
 
         public void UpdateCameraVisibility(float3 cameraPosition) => UpdateCameraVisibility(cameraPosition, true);

@@ -54,6 +54,7 @@ namespace DigBlocks.Voxels.Runtime
         private sealed class Entry
         {
             public ChunkData Data; public Entity Entity; public int Leases, HistoryCellCount;
+            public bool Loaded;
             public readonly Queue<ChunkDelta> History = new();
         }
         private sealed class Pending
@@ -78,6 +79,7 @@ namespace DigBlocks.Voxels.Runtime
         public int Count => chunks.Count;
         public bool IsDisposed => disposed;
         public event Action<ChunkAddress> ReplicaChanged;
+        public event Action<ChunkAddress> ReplicaRemoved;
         public event Action ReplicasReset;
 
         public bool TryGetReplicaStamp(ChunkAddress address, out ResidentChunk stamp)
@@ -222,11 +224,37 @@ namespace DigBlocks.Voxels.Runtime
             if (next == null) throw new ArgumentNullException(nameof(next));
             if (next.Count > maxResidents) throw new ArgumentException("Interest exceeds replica capacity.");
             if (interest != null && next.Epoch <= interest.Epoch) return false;
-            foreach (var entry in chunks.Values)
-            { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
-            chunks.Clear(); interest = next;
-            ReplicasReset?.Invoke();
+            interest = next;
+            var removed = new List<ChunkAddress>();
+            foreach (var pair in chunks)
+                if (!next.Contains(pair.Key)) removed.Add(pair.Key);
+            foreach (var address in removed)
+            {
+                var entry = chunks[address];
+                entry.Data.Dispose();
+                if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity);
+                chunks.Remove(address);
+                ReplicaRemoved?.Invoke(address);
+            }
             return true;
+        }
+
+        public void EnsureLoaded(ChunkLease lease, IAuthoritativeChunkSource source)
+        {
+            Validate(lease);
+            var entry = chunks[lease.Address];
+            if (entry.Loaded) return;
+            var edits = source?.LoadOrGenerate(lease.Address) ?? Array.Empty<CellEdit>();
+            if (edits == null) throw new InvalidOperationException("Chunk source returned no result.");
+            ValidateEdits(edits);
+            entry.Data.Apply(edits, registry.MaxSolidStateId, registry.MaxFluidStateId);
+            manager.SetComponentData(entry.Entity, new ResidentChunk
+            {
+                Address = lease.Address,
+                Incarnation = lease.Incarnation,
+                Revision = lease.Data.Revision
+            });
+            entry.Loaded = true;
         }
 
         public void ClearReplicas()
@@ -306,13 +334,10 @@ namespace DigBlocks.Voxels.Runtime
         {
             Validate(lease);
             if (edits == null) throw new ArgumentNullException(nameof(edits));
-            foreach (var edit in edits)
-            {
-                var solid = registry.GetSolid(edit.Solid); registry.GetFluid(edit.Fluid);
-                if (edit.Fluid != 0 && !solid.PermitsFluid) throw new ArgumentException("Solid state does not permit fluid.", nameof(edits));
-            }
+            ValidateEdits(edits);
             ulong baseline = lease.Data.Revision;
             lease.Data.Apply(edits, registry.MaxSolidStateId, registry.MaxFluidStateId);
+            chunks[lease.Address].Loaded = true;
             if (lease.Data.Revision != baseline)
             {
                 var entry = chunks[lease.Address];
@@ -328,6 +353,15 @@ namespace DigBlocks.Voxels.Runtime
                 }
             }
             manager.SetComponentData(lease.Entity, new ResidentChunk { Address = lease.Address, Incarnation = lease.Incarnation, Revision = lease.Data.Revision });
+        }
+
+        private void ValidateEdits(CellEdit[] edits)
+        {
+            foreach (var edit in edits)
+            {
+                var solid = registry.GetSolid(edit.Solid); registry.GetFluid(edit.Fluid);
+                if (edit.Fluid != 0 && !solid.PermitsFluid) throw new ArgumentException("Solid state does not permit fluid.", nameof(edits));
+            }
         }
         internal void Release(ChunkLease lease)
         {

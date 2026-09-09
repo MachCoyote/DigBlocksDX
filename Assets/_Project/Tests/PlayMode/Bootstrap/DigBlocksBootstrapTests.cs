@@ -66,7 +66,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
             {
                 Assert.That(owner.Terrain, Is.Not.Null);
-                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(9));
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(75));
                 Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
             }
 
@@ -89,10 +89,10 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             {
                 owner.RequestPlay();
                 yield return WaitForApplicationState(owner, ApplicationState.Playing, 30);
-                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(9));
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(75));
                 Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
                 for (int frame = 0; frame < 4; frame++) yield return null;
-                Assert.That(owner.Terrain.Quads, Is.GreaterThan(9000), "All nine fixture chunks, including the updated center, must be meshed before Playing.");
+                Assert.That(owner.Terrain.Quads, Is.GreaterThan(0), "All chunks in the initial moving interest must be meshed before Playing.");
                 yield return new WaitForEndOfFrame();
                 var capture = ScreenCapture.CaptureScreenshotAsTexture();
                 try

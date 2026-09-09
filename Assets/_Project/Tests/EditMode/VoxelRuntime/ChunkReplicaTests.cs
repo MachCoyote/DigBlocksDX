@@ -56,6 +56,37 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(store.DataReady, Is.True);
         }
 
+        [Test]
+        public void InterestReplacementRetainsOverlappingReplicasAndEvictsOnlyDepartedChunks()
+        {
+            using var world = new World("Replica overlap");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            store.EnableReplicas();
+            var first = new ChunkInterest(1, new ChunkAddress(1, default), 1, 0);
+            store.SetReplicaInterest(first);
+            foreach (var address in first.Addresses())
+                store.PublishReplica(first.Epoch, Image(address, 1));
+
+            var retainedAddress = new ChunkAddress(1, new int3(1, 0, 0));
+            Assert.That(store.TryGetReplicaStamp(retainedAddress, out var retained), Is.True);
+            using var query = world.EntityManager.CreateEntityQuery(typeof(ResidentChunk));
+            var retainedEntity = query.ToEntityArray(Unity.Collections.Allocator.Temp);
+            Entity entity = Entity.Null;
+            foreach (var candidate in retainedEntity)
+                if (world.EntityManager.GetComponentData<ResidentChunk>(candidate).Address.Equals(retainedAddress)) entity = candidate;
+            retainedEntity.Dispose();
+
+            var second = new ChunkInterest(2, new ChunkAddress(1, new int3(1, 0, 0)), 1, 0);
+            Assert.That(store.SetReplicaInterest(second), Is.True);
+
+            Assert.That(store.Count, Is.EqualTo(6));
+            Assert.That(store.TryGetReplicaStamp(retainedAddress, out var after), Is.True);
+            Assert.That(after.Incarnation, Is.EqualTo(retained.Incarnation));
+            Assert.That(world.EntityManager.Exists(entity), Is.True);
+            Assert.That(store.TryGetReplicaStamp(new ChunkAddress(1, new int3(-1, 0, 0)), out _), Is.False);
+            Assert.That(store.DataReady, Is.False);
+        }
+
         private static ChunkImage Image(ChunkAddress address, ulong revision) =>
             new ChunkImage(address, 1, revision, new uint[ChunkLayout.Volume], new uint[ChunkLayout.Volume]);
     }

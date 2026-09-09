@@ -4,6 +4,14 @@ Status: September 7, 2026. The dummy chunk-data pipeline is implemented through
 client publication and separate data readiness. Meshing, terrain generation,
 persistence, controllers and playable ghosts remain outside this milestone.
 
+September 9 addendum: camera-driven development interest, overlap retention,
+incremental client eviction, and a lazy authoritative content-source seam are now
+implemented. Interest addresses are prioritized radially by squared 3D distance
+from the current anchor. The bounded fixture/Perlin sample is test content, not the final
+terrain generator. See the [dynamic chunk loading implementation summary](dynamic-chunk-loading.md)
+for current behavior; the remainder of this document records the original
+streaming milestone and its verification.
+
 ## Runtime path and ownership
 
 Native admission offers a single-use ticket for the independent reliable IPC/UDP

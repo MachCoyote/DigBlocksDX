@@ -22,13 +22,16 @@ namespace DigBlocks.Networking.NetCode
         private BulkCompanionSystem serverSystem, clientSystem;
         private BulkCompanionEndpoint serverEndpoint, clientEndpoint;
         private readonly ChunkStreamingOptions streamingOptions;
+        private readonly IAuthoritativeChunkSource authoritativeSource;
         private bool started, stopped;
         private NetworkFailure startupFailure;
 
         public ChunkCompanionService(NetCodeSession session, ushort? bulkPort = null, BlockRegistry registry = null,
-            double bindingTimeoutSeconds = 10, int maxPendingBindings = 16, ChunkStreamingOptions streamingOptions = null)
+            double bindingTimeoutSeconds = 10, int maxPendingBindings = 16, ChunkStreamingOptions streamingOptions = null,
+            IAuthoritativeChunkSource authoritativeSource = null)
         {
             this.streamingOptions = streamingOptions ?? new ChunkStreamingOptions();
+            this.authoritativeSource = authoritativeSource;
             this.session = session ?? throw new ArgumentNullException(nameof(session));
             if (!(bindingTimeoutSeconds > 0 && bindingTimeoutSeconds <= 120)) throw new ArgumentOutOfRangeException(nameof(bindingTimeoutSeconds));
             if (maxPendingBindings < 1 || maxPendingBindings > 128) throw new ArgumentOutOfRangeException(nameof(maxPendingBindings));
@@ -45,6 +48,8 @@ namespace DigBlocks.Networking.NetCode
         public int PendingChunkPayloads => serverEndpoint?.PendingChunkPayloads ?? 0;
         public bool SetServerInterest(ulong peerId, ChunkAddress anchor, int horizontalRadius, int verticalRadius) =>
             serverEndpoint?.SetInterest(peerId, anchor, horizontalRadius, verticalRadius) ?? false;
+        public bool RequestClientInterest(ChunkAddress anchor) => clientEndpoint?.RequestInterest(anchor) ?? false;
+        public uint WorldId => streamingOptions.WorldId;
         public string Name => nameof(ChunkCompanionService);
         public ushort ListeningPort => serverEndpoint?.Port ?? 0;
         public int BoundPeerCount => serverEndpoint?.BoundPeerCount ?? 0;
@@ -90,7 +95,7 @@ namespace DigBlocks.Networking.NetCode
                     }
                     serverSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (serverSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
-                    try { serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending, streamingOptions); }
+                    try { serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending, streamingOptions, authoritativeSource); }
                     catch (InvalidOperationException) { throw new NetworkSessionException(NetworkFailure.ListenFailed); }
                     serverSystem.Endpoint = serverEndpoint;
                 }

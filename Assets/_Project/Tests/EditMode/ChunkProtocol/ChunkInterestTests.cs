@@ -38,5 +38,23 @@ namespace DigBlocks.ChunkProtocol.Tests
             Assert.That(edge.Count, Is.EqualTo(1));
             Assert.That(edge.Contains(new ChunkAddress(1, new int3(int.MaxValue))), Is.False);
         }
+
+        [Test]
+        public void EnumeratesChunksRadiallyFromTheAnchor()
+        {
+            var anchor = new ChunkAddress(1, new int3(-4, 7, 12));
+            var addresses = new ChunkInterest(1, anchor, 2, 1).Addresses();
+            long previousDistance = -1;
+            foreach (var address in addresses)
+            {
+                long dx = (long)address.Position.x - anchor.Position.x;
+                long dy = (long)address.Position.y - anchor.Position.y;
+                long dz = (long)address.Position.z - anchor.Position.z;
+                long distance = dx * dx + dy * dy + dz * dz;
+                Assert.That(distance, Is.GreaterThanOrEqualTo(previousDistance),
+                    $"{address} was scheduled after a farther chunk.");
+                previousDistance = distance;
+            }
+        }
     }
 }

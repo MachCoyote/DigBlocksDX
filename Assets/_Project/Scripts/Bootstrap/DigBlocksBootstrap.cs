@@ -12,7 +12,6 @@ using System.Threading;
 using UnityEngine;
 using DigBlocks.Client.Rendering;
 using DigBlocks.Client.Runtime;
-using DigBlocks.Server.Runtime;
 using System.Collections.Generic;
 
 namespace DigBlocks.Bootstrap
@@ -216,19 +215,22 @@ namespace DigBlocks.Bootstrap
 
         private IReadOnlyList<IGameService> ComposeSession(LaunchOptions launch, NetworkLaunchSettings network)
         {
-            var services = new List<IGameService>(GameServiceComposer.Compose(launch, logger, network));
             var content = BlockContentProvider.Load();
-            ServerRuntime server = null; ClientRuntime client = null;
+            var streamingSettings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
+            var streamingOptions = streamingSettings != null ? streamingSettings.CreateOptions() : new ChunkStreamingOptions();
+            var source = useTerrainFixture ? new TerrainFixtureChunkSource(content.Registry, streamingOptions.WorldId) : null;
+            var services = new List<IGameService>(GameServiceComposer.Compose(launch, logger, network, source));
+            ClientRuntime client = null;
+            ChunkCompanionService companion = null;
             foreach (var service in services)
             {
-                if (service is ServerRuntime s) server = s;
                 if (service is ClientRuntime c) client = c;
+                if (service is ChunkCompanionService chunkCompanion) companion = chunkCompanion;
             }
-            if (server != null && useTerrainFixture)
-                services.Add(new TerrainFixtureService(() => server.World, content.Registry, client == null ? null : () => client.World));
             if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
                 services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
-                    () => presentation?.GameplayInputAvailable ?? false, presentation?.DebugOptions));
+                    () => presentation?.GameplayInputAvailable ?? false, presentation?.DebugOptions,
+                    companion == null ? null : companion.RequestClientInterest, companion?.WorldId ?? 1));
             return services;
         }
 

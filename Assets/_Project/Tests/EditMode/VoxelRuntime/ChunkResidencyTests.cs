@@ -101,6 +101,31 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(store.TryGetDelta(replacement, 1, out _), Is.False);
         }
 
+        [Test]
+        public void AuthoritativeSourceLoadsOncePerIncarnationAndExplicitContentWins()
+        {
+            using var world = new World("Chunk source seam");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            var source = new CountingSource();
+            var address = new ChunkAddress(1, default);
+            using (var lease = store.Acquire(address))
+            {
+                store.EnsureLoaded(lease, source);
+                store.EnsureLoaded(lease, source);
+                Assert.That(source.Calls, Is.EqualTo(1));
+                Assert.That(lease.SolidAt(0), Is.EqualTo(1));
+            }
+            using (var reentered = store.Acquire(address))
+            {
+                store.EnsureLoaded(reentered, source);
+                Assert.That(source.Calls, Is.EqualTo(2));
+            }
+            using var authored = store.Acquire(new ChunkAddress(1, new int3(1, 0, 0)));
+            authored.Apply(new[] { new CellEdit(0, 1, 0) });
+            store.EnsureLoaded(authored, source);
+            Assert.That(source.Calls, Is.EqualTo(2));
+        }
+
         [UnityTest]
         public IEnumerator SnapshotSurvivesEditsButNotUnloadAndCapacityIncludesCompletedWork()
         {
@@ -140,6 +165,16 @@ namespace DigBlocks.Voxels.Runtime.Tests
             for (int i = 0; i < 4; i++) { store.PumpSnapshots(); yield return null; }
             world.Dispose();
             Assert.That(store.PendingSnapshots, Is.Zero);
+        }
+
+        private sealed class CountingSource : IAuthoritativeChunkSource
+        {
+            public int Calls;
+            public CellEdit[] LoadOrGenerate(ChunkAddress address)
+            {
+                Calls++;
+                return new[] { new CellEdit(0, 1, 0) };
+            }
         }
     }
 }

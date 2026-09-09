@@ -85,11 +85,12 @@ namespace DigBlocks.Client.Rendering
             if (current != null && current.IsDisposed) current = null;
             if (!ReferenceEquals(store, current))
             {
-                if (store != null) { store.ReplicaChanged -= OnChanged; store.ReplicasReset -= OnReset; }
+                if (store != null) { store.ReplicaChanged -= OnChanged; store.ReplicaRemoved -= OnRemoved; store.ReplicasReset -= OnReset; }
                 OnReset(); store = current;
                 if (store != null)
                 {
                     store.ReplicaChanged += OnChanged; store.ReplicasReset += OnReset;
+                    store.ReplicaRemoved += OnRemoved;
                     store.GetReplicaStamps(initial);
                     foreach (var stamp in initial) OnChanged(stamp.Address);
                 }
@@ -189,6 +190,21 @@ namespace DigBlocks.Client.Rendering
         {
             entries.Clear(); ResetSlots(); BuiltCount = 0; renderer.SetGraphReady(false); renderer.ClearMeshes();
         }
+
+        private void OnRemoved(ChunkAddress address)
+        {
+            if (!entries.Remove(address, out var removed)) return;
+            renderer.SetGraphReady(false);
+            renderer.Remove(removed.Slot);
+            freeSlots.Push(removed.Slot);
+            if (removed.Built != 0) BuiltCount--;
+            for (int i = 1; i < 7; i++)
+                if (entries.TryGetValue(Neighbor(address, i), out var dirty))
+                {
+                    if (dirty.Built == dirty.Dirty) dirty.Enqueued = tick;
+                    dirty.Dirty++;
+                }
+        }
         private void ResetSlots() { freeSlots.Clear(); for (int i = settings.MaxChunks - 1; i >= 0; i--) freeSlots.Push((uint)i); }
         private static ChunkAddress Neighbor(ChunkAddress address, int index)
         {
@@ -198,7 +214,7 @@ namespace DigBlocks.Client.Rendering
         }
         public void Dispose()
         {
-            if (store != null) { store.ReplicaChanged -= OnChanged; store.ReplicasReset -= OnReset; }
+            if (store != null) { store.ReplicaChanged -= OnChanged; store.ReplicaRemoved -= OnRemoved; store.ReplicasReset -= OnReset; }
             foreach (var worker in workers) worker.Dispose();
             appearance.Dispose(); attributes.Dispose(); entries.Clear();
         }

@@ -4,9 +4,11 @@ using Cysharp.Threading.Tasks;
 using DigBlocks.Core.Diagnostics;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Session;
+using DigBlocks.Voxels;
 using DigBlocks.Voxels.Definitions;
 using DigBlocks.Voxels.Runtime;
 using Unity.Entities;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering.Universal;
@@ -20,6 +22,7 @@ namespace DigBlocks.Client.Rendering
         private readonly CompiledBlockContent content;
         private readonly TerrainRenderSettings settings;
         private readonly IDebugOptions debugOptions;
+        private readonly ChunkInterestReporter interestReporter;
         private GameObject root;
         private TerrainView view;
         private TerrainMeshingSystem system;
@@ -50,8 +53,12 @@ namespace DigBlocks.Client.Rendering
         }
 
         public TerrainRenderService(Func<World> getWorld, CompiledBlockContent content, TerrainRenderSettings settings, Func<bool> inputAvailable,
-            IDebugOptions debugOptions = null)
-        { this.getWorld = getWorld; this.content = content; this.settings = settings; this.inputAvailable = inputAvailable; this.debugOptions = debugOptions; }
+            IDebugOptions debugOptions = null, Func<ChunkAddress, bool> requestChunkInterest = null, uint worldId = 1)
+        {
+            this.getWorld = getWorld; this.content = content; this.settings = settings; this.inputAvailable = inputAvailable;
+            this.debugOptions = debugOptions;
+            if (requestChunkInterest != null) interestReporter = new ChunkInterestReporter(worldId, requestChunkInterest);
+        }
 
         public async UniTask StartAsync(CancellationToken cancellationToken)
         {
@@ -124,7 +131,9 @@ namespace DigBlocks.Client.Rendering
             try
             {
                 var world = getWorld();
-                scheduler.Tick(world is { IsCreated: true } ? world.GetExistingSystemManaged<ChunkWorldSystem>()?.Store : null, view.transform.position);
+                float3 position = view.transform.position;
+                interestReporter?.Update(position);
+                scheduler.Tick(world is { IsCreated: true } ? world.GetExistingSystemManaged<ChunkWorldSystem>()?.Store : null, position);
             }
             catch (Exception error) { failure = error; Debug.LogException(error); }
         }
@@ -155,6 +164,29 @@ namespace DigBlocks.Client.Rendering
             if (previousCamera != null) previousCamera.enabled = previousCameraEnabled;
             if (root != null) UnityEngine.Object.Destroy(root);
             root = null; view = null; camera = null;
+        }
+    }
+
+    public sealed class ChunkInterestReporter
+    {
+        private readonly uint worldId;
+        private readonly Func<ChunkAddress, bool> request;
+        private ChunkAddress reported;
+        private bool hasReported;
+
+        public ChunkInterestReporter(uint worldId, Func<ChunkAddress, bool> request)
+        {
+            if (worldId == 0) throw new ArgumentOutOfRangeException(nameof(worldId));
+            this.worldId = worldId; this.request = request ?? throw new ArgumentNullException(nameof(request));
+        }
+
+        public bool Update(float3 worldPosition)
+        {
+            var anchor = new ChunkAddress(worldId, (int3)math.floor(worldPosition / ChunkLayout.Edge));
+            if (hasReported && reported.Equals(anchor)) return false;
+            if (!request(anchor)) return false;
+            reported = anchor; hasReported = true;
+            return true;
         }
     }
 

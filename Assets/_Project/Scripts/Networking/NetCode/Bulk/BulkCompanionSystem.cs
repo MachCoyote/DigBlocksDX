@@ -87,8 +87,11 @@ namespace DigBlocks.Networking.NetCode
         public bool SetInterest(ulong id, ChunkAddress anchor, int horizontal, int vertical) =>
             !disposed && streamingServer != null && peers.TryGetValue(id, out var peer) && Live(Context, id, peer) &&
             streamingServer.SetInterest(id, anchor, horizontal, vertical, Now);
+        public bool RequestInterest(ChunkAddress anchor) =>
+            !disposed && !server && streamingClient != null && streamingClient.RequestInterest(anchor);
 
-        public BulkCompanionEndpoint(World world, bool server, bool ipc, ushort port, BlockRegistry registry, double timeout, int maxPending, ChunkStreamingOptions streamingOptions)
+        public BulkCompanionEndpoint(World world, bool server, bool ipc, ushort port, BlockRegistry registry, double timeout, int maxPending,
+            ChunkStreamingOptions streamingOptions, IAuthoritativeChunkSource source = null)
         {
             this.world = world; this.server = server; this.ipc = ipc; this.registry = registry; this.timeout = timeout; this.maxPending = maxPending;
             this.streamingOptions = streamingOptions;
@@ -102,7 +105,7 @@ namespace DigBlocks.Networking.NetCode
                 Port = driver.LocalPort; State = ChunkConnectionState.Listening;
                 streamingServer = new ChunkStreamingServer(store, streamingOptions,
                     (id, packet) => peers.TryGetValue(id, out var peer) && Live(Context, id, peer) && driver.TrySend(peer.Connection, packet),
-                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed));
+                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed), source);
             }
             else { State = ChunkConnectionState.AwaitingOffer; clientDeadline = Now + timeout; }
         }
