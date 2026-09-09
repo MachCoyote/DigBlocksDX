@@ -2,7 +2,7 @@
 
 September 8, 2026. Implemented opaque full-cube milestone for Unity 6000.6 / URP 17.6.
 
-Open the Bootstrap scene, enter Play Mode, and choose Play. The authoritative development fixture supplies nine chunks through the existing replication channel. The inspection camera uses WASD, mouse look, Space / Left Control for elevation, and Left Shift for speed. Menu focus gates camera input. The bootstrap `useTerrainFixture` flag disables this bounded fixture; it is not world generation or persistence.
+Open the Bootstrap scene, enter Play Mode, and choose Play. The authoritative development fixture supplies nine chunks through the existing replication channel. The inspection camera uses WASD, mouse look, Space / Left Control for elevation, and Left Shift for speed. Menu focus gates camera input. A Scene view open during Play Mode shows the same terrain and can be flown independently. The bootstrap `useTerrainFixture` flag disables this bounded fixture; it is not world generation or persistence.
 
 ## Ownership and flow
 
@@ -24,7 +24,7 @@ Each greedy quad occupies exactly 12 bytes:
 
 The vertex shader reconstructs six triangle vertices, face normals, and repeating UVs. No generic vertex/index stream or baked lighting/AO is emitted. Merge identity is texture, tint, resolved rotation and material; direction is implicit in each sweep. State IDs do not prevent merging. Face appearance remains four bytes, with fixed rotation and randomization policy sharing one byte.
 
-Compute culling builds references into resident geometry, with camera frustum/distance rejection and a conservative separate shadow list. One indirect camera submission and one shadow-only submission per material replace per-chunk draw calls. URP owns the actual lighting/depth/shadow passes; this is not a claim of native multi-command MDI. The shader implements forward lighting, shadows, depth and normals.
+Compute culling builds references into resident geometry, with camera frustum/distance rejection and a conservative separate shadow list. One indirect camera submission and one shadow-only submission per material replace per-chunk draw calls. An indirect submission is addressed to a single camera, so every viewport that should show terrain is named on a draw of its own; see the secondary camera section below. URP owns the actual lighting/depth/shadow passes; this is not a claim of native multi-command MDI. The shader implements forward lighting, shadows, depth and normals.
 
 ## Chunk graph occlusion
 
@@ -53,6 +53,43 @@ The preflight covers both APIs; integrated world tests currently run on DX12. No
 Fresh verification: 81 affected EditMode tests passed, followed by the added fragmented-capacity benchmark test (passed); three targeted PlayMode tests passed together. Lean workflow validation and whitespace checks passed. Warmed Burst schedule-plus-completion averages over 10 samples were 1.416 ms uniform (6 quads / 72 bytes), 2.189 ms checkerboard (98,304 / 1,179,648), and 3.767 ms random (32,943 / 395,316). These editor microbenchmarks include job dispatch/completion overhead and are not GPU or whole-frame measurements.
 
 September 9 chunk-occlusion verification added 26 focused connectivity/traversal tests within 45 passing meshing/rendering EditMode tests and a two-test terrain PlayMode fixture. The complete 3x3 fixture reported 9 resident nodes, 3 visible / 1 culled renderable chunks and 14 camera-visible quads with graph culling, versus 4 visible / 0 culled and 20 quads when disabled. Warmed Burst visibility / combined mesh-plus-visibility costs were 0.654 / 1.407 ms for a uniform chunk, 1.260 / 1.292 ms for a sealed plane, 2.509 / 2.592 ms for a checkerboard and 2.156 / 3.767 ms for deterministic random occupancy. These CPU/editor workload measurements do not establish a GPU or frame-time improvement.
+
+September 9 secondary camera verification added four focused EditMode tests covering camera eligibility, Scene view collection and culling-mode clamping within 227 passing EditMode tests, and one terrain PlayMode test that reads back real render targets. With the session camera facing away from the only chunk, a second camera painted terrain while culling for itself, painted nothing while mirroring that camera's empty visible set, and painted nothing with secondary rendering switched off. Scene view rendering during a live session was confirmed visually. The one PlayMode failure, `SampleScene_BootstrapReachesTitle`, is pre-existing and loads a scene absent from the project.
+
+## Secondary cameras
+
+Terrain is submitted per camera rather than registered in a scene, so a camera the
+session does not drive — a Scene view during Play Mode, a second viewport, a future
+split screen — shows nothing unless it is named on a submission of its own. Draw
+takes the session's camera and fans out from there. `TerrainCameraSet` decides which
+others qualify: enabled base Game cameras whose culling mask includes the terrain
+layer, plus every open Scene view in the editor. Overlay cameras are rejected because
+they draw into the base camera stacking them, and preview and reflection cameras
+because they render outside the frame loop and would strand their submissions.
+
+Each camera culls for its own view. The occlusion graph holds one visible set at a
+time, so a camera culls into it and uploads the result before the next camera
+overwrites it, and only the session camera's pass is reported through the
+`CameraVisibleChunks` / `GraphCulledChunks` / `CameraVisibleQuads` diagnostics. The
+cull output itself cannot be shared: a camera needs its own ring of append buffers,
+sized by `TerrainRenderSettings.SecondaryFrameSlots` and allocated the first frame
+that camera draws, then handed back once it has been idle for a while and the GPU has
+finished with it. A failed allocation disables secondary viewports rather than taking
+the session down. `TerrainRenderSettings.SecondaryCameraRendering` is the authored
+default for the whole behaviour and `TerrainRenderService.SecondaryCameraRendering`
+overrides it at runtime, so a user setting can switch extra viewports off wholesale.
+
+The `F5` debug toggle picks between the two culling modes. `Own View` is the default
+and gives each viewport the terrain it can actually see. `Mirror Main` submits the
+main camera's frame to the secondary viewports as it stands, costing no extra buffers
+and showing exactly the geometry that camera kept — fly a Scene view around and the
+holes are what frustum, distance and graph culling removed.
+
+A frame is recycled only after every camera holding it has rendered, which is why a
+frame counts its outstanding submissions instead of tracking one camera. A camera that
+never reaches the pipeline, such as a Scene view hidden behind the Game tab, would
+otherwise hold its frame pending forever and drain the ring, so a submission left over
+from an earlier frame is resolved at the start of the next draw.
 
 ## Debug views
 

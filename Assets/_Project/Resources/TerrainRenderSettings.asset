@@ -26,7 +26,9 @@ MonoBehaviour:
   UploadBytesPerFrame: 4194304
   UploadSlots: 2
   FrameSlots: 3
+  SecondaryFrameSlots: 2
   RenderDistance: 512
   VisualSeed: 1663821211
   ChunkOcclusionCulling: 1
   CastShadows: 1
+  SecondaryCameraRendering: 1

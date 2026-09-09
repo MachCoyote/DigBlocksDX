@@ -26,6 +26,15 @@ namespace DigBlocks.Client.Rendering
         ShadedOnly = 2
     }
 
+    public enum TerrainSecondaryCameraCulling
+    {
+        //every camera culls for its own view, so each viewport shows the terrain it can actually see
+        OwnView = 0,
+
+        //secondary cameras reuse the main camera's visible set, which shows what the main camera culled away
+        MirrorMain = 1
+    }
+
     //translates the shared debug switchboard into the terrain shader's globals. Rendering owns its
     //shader state; the debug menu only knows it flipped a numbered toggle.
     //Overdraw needs blend and depth state as well, which comes from material properties rather than
@@ -101,6 +110,13 @@ namespace DigBlocks.Client.Rendering
         {
             int state = options != null ? options.GetState(DebugToggleIds.Overdraw) : 0;
             return (TerrainOverdrawMode)Mathf.Clamp(state, 0, (int)TerrainOverdrawMode.ShadedOnly);
+        }
+
+        //the culling mode changes no shader state, so the renderer reads it without a binder instance
+        public static TerrainSecondaryCameraCulling ReadSecondaryCameraCulling(IDebugOptions options)
+        {
+            int state = options != null ? options.GetState(DebugToggleIds.SecondaryCameraCulling) : 0;
+            return (TerrainSecondaryCameraCulling)Mathf.Clamp(state, 0, (int)TerrainSecondaryCameraCulling.MirrorMain);
         }
 
         public void Dispose()

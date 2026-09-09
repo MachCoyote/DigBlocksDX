@@ -1,6 +1,6 @@
 {
   "name": "DigBlocks.Client.Rendering.Tests",
-  "references": ["DigBlocks.Client.Rendering", "DigBlocks.Voxels", "DigBlocks.Voxels.Meshing", "Unity.Mathematics"],
+  "references": ["DigBlocks.Client.Rendering", "DigBlocks.Core", "DigBlocks.Voxels", "DigBlocks.Voxels.Meshing", "Unity.Mathematics", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"]
 }

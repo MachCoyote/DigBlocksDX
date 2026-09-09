@@ -23,7 +23,7 @@
 | `DigBlocks.Bootstrap.Tests` | Test | `Assets/_Project/Tests/EditMode/Bootstrap/DigBlocks.Bootstrap.Tests.asmdef` | DigBlocks.Bootstrap, DigBlocks.Client, DigBlocks.Client.UI, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server |
 | `DigBlocks.ChunkProtocol.Tests` | Test | `Assets/_Project/Tests/EditMode/ChunkProtocol/DigBlocks.ChunkProtocol.Tests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Voxels |
 | `DigBlocks.Client.Rendering.Editor.Tests` | Test | `Assets/_Project/Tests/EditMode/ClientRendering/DigBlocks.Client.Rendering.Editor.Tests.asmdef` | DigBlocks.Client.Rendering.Editor |
-| `DigBlocks.Client.Rendering.Tests` | Test | `Assets/_Project/Tests/EditMode/ClientRenderingRuntime/DigBlocks.Client.Rendering.Tests.asmdef` | DigBlocks.Client.Rendering, DigBlocks.Voxels, DigBlocks.Voxels.Meshing |
+| `DigBlocks.Client.Rendering.Tests` | Test | `Assets/_Project/Tests/EditMode/ClientRenderingRuntime/DigBlocks.Client.Rendering.Tests.asmdef` | DigBlocks.Client.Rendering, DigBlocks.Core, DigBlocks.Voxels, DigBlocks.Voxels.Meshing |
 | `DigBlocks.Client.Tests` | Test | `Assets/_Project/Tests/EditMode/Client/DigBlocks.Client.Tests.asmdef` | DigBlocks.Client, DigBlocks.Client.UI, DigBlocks.Core |
 | `DigBlocks.Core.Tests` | Test | `Assets/_Project/Tests/EditMode/Core/DigBlocks.Core.Tests.asmdef` | DigBlocks.Core |
 | `DigBlocks.NetCode.PlayModeTests` | Test | `Assets/_Project/Scripts/Networking/NetCode/PlayModeTests/DigBlocks.NetCode.PlayModeTests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Client, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |

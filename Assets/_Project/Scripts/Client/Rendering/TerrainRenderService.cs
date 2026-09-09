@@ -31,10 +31,23 @@ namespace DigBlocks.Client.Rendering
         private Color defaultBackground;
         private CameraClearFlags defaultClearFlags;
         private Exception failure;
+        private bool? secondaryCameraRendering;
         public string Name => nameof(TerrainRenderService);
         public string ReadinessDescription => "Building chunk meshes...";
         public int BuiltChunks => scheduler?.BuiltCount ?? 0;
         public int Quads => renderer?.LiveQuads ?? 0;
+
+        //whether terrain draws into cameras besides this session's own. The authored setting is the default
+        //until something overrides it, so a user setting can drive this without knowing the renderer exists
+        public bool SecondaryCameraRendering
+        {
+            get => secondaryCameraRendering ?? settings.SecondaryCameraRendering;
+            set
+            {
+                secondaryCameraRendering = value;
+                if (renderer != null) renderer.SecondaryCameraRendering = value;
+            }
+        }
 
         public TerrainRenderService(Func<World> getWorld, CompiledBlockContent content, TerrainRenderSettings settings, Func<bool> inputAvailable,
             IDebugOptions debugOptions = null)
@@ -48,6 +61,7 @@ namespace DigBlocks.Client.Rendering
                 var world = getWorld();
                 if (world == null || !world.IsCreated) throw new InvalidOperationException("Terrain requires the client world.");
                 renderer = new TerrainRenderer(content, settings);
+                if (secondaryCameraRendering.HasValue) renderer.SecondaryCameraRendering = secondaryCameraRendering.Value;
                 scheduler = new ChunkMeshScheduler(content, settings, renderer);
                 root = new GameObject("Terrain presentation");
                 UnityEngine.Object.DontDestroyOnLoad(root);
@@ -66,6 +80,7 @@ namespace DigBlocks.Client.Rendering
                 view.Initialize(camera, renderer, inputAvailable);
                 if (debugOptions != null) debugOptions.StateChanged += OnDebugStateChanged;
                 ApplyOverdrawMode();
+                ApplySecondaryCameraCulling();
                 system = world.GetExistingSystemManaged<TerrainMeshingSystem>();
                 if (system == null)
                 {
@@ -84,7 +99,12 @@ namespace DigBlocks.Client.Rendering
         private void OnDebugStateChanged(DebugToggleId id, int state)
         {
             if (id == DebugToggleIds.Overdraw) ApplyOverdrawMode();
+            else if (id == DebugToggleIds.SecondaryCameraCulling) ApplySecondaryCameraCulling();
         }
+
+        //culling mode is pure renderer state; unlike overdraw it touches no shader or camera settings
+        private void ApplySecondaryCameraCulling() =>
+            renderer?.SetSecondaryCameraCulling(TerrainDebugBinder.ReadSecondaryCameraCulling(debugOptions));
 
         //the shader globals are set process-wide by TerrainDebugBinder; blend and depth state come from
         //material properties, so the session applies that half to its own clones and its own camera

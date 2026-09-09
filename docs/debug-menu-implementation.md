@@ -18,11 +18,13 @@ rendering can obey it without depending on client UI.
 | Overlay | `Debug` menu on the overlay layer, catalog-registered, toggled by `F3` at any time |
 | Isolation | Blocks no gameplay input, releases no cursor, takes no navigation focus, passes back through |
 | Toggles | Declared in code with a display name, a key and a cycle of named states |
+| Default state | State zero is what the switchboard starts and resets to; for a shading view that is `Off`, for a toggle choosing between equivalent modes it is the ordinary one |
 | Keybinds | One standalone `InputAction` per toggle, live only while the overlay is open |
 | State | `DebugOptions` in Core, keyed by `DebugToggleId`, with change notification |
 | Wireframe | `F8`, screen-space triangle edges from barycentrics: off, over the surface, wires only |
 | Fullbright | `F7`, authored surface colour with no lighting, ambient, shadowing or fog |
 | Overdraw | `F6`, additive layer count as a red-to-white heat ramp: off, every layer, shaded fragments only |
+| Secondary camera culling | `F5`, whether a viewport other than the session's culls for itself or is handed the main camera's visible set |
 
 ## Menu system changes
 

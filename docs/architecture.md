@@ -82,6 +82,7 @@ transport-specific implementation.
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
 | Debug menu, debug toggles, or the terrain debug views | `Scripts/Client/Debugging`, `Scripts/Core/Diagnostics`, then `docs/debug-menu-implementation.md` |
+| Terrain missing from the Scene view or another viewport | `Scripts/Client/Rendering/TerrainCameraSet.cs`, then `docs/terrain-secondary-camera-summary.md` |
 | Application state, play/pause/quit intent | `Scripts/Client/Flow`, then `Scripts/Client/Input` |
 | Session lifetime or world readiness | `Scripts/Bootstrap/Session`, then `Scripts/Core/Session` |
 | Architecture or dependency question | this document, then the generated assembly map and relevant `.asmdef` |
@@ -258,4 +259,4 @@ and offline tools.
 
 ## Terrain presentation
 
-The client meshing and indirect rendering milestone is documented in [chunk meshing and terrain rendering](chunk-meshing-rendering.md), with the later conservative portal-culling work recorded in the [terrain chunk occlusion implementation summary](terrain-chunk-occlusion-summary.md). `DigBlocks.Voxels.Meshing` owns Burst greedy geometry, packed quad contracts and revision-matched chunk face connectivity; `DigBlocks.Client.Rendering` owns scheduling, camera graph traversal, GPU memory, shaders and the inspection camera. Replica publication/reset notifications originate in Voxels.Runtime. Bootstrap composes presentation only for graphical clients and supplies a bounded authoritative development fixture through ordinary replication.
+The client meshing and indirect rendering milestone is documented in [chunk meshing and terrain rendering](chunk-meshing-rendering.md), with the later conservative portal-culling work recorded in the [terrain chunk occlusion implementation summary](terrain-chunk-occlusion-summary.md) and per-camera submission in the [terrain secondary camera implementation summary](terrain-secondary-camera-summary.md). `DigBlocks.Voxels.Meshing` owns Burst greedy geometry, packed quad contracts and revision-matched chunk face connectivity; `DigBlocks.Client.Rendering` owns scheduling, camera graph traversal, GPU memory, shaders, the inspection camera, and which cameras terrain is submitted to. Replica publication/reset notifications originate in Voxels.Runtime. Bootstrap composes presentation only for graphical clients and supplies a bounded authoritative development fixture through ordinary replication.

@@ -72,6 +72,9 @@ namespace DigBlocks.Client.Rendering
             public readonly List<MeshRangeAllocator.Allocation> References = new();
             public Bounds Bounds;
             public int Epoch;
+
+            //how many cameras have been handed this frame and have not finished rendering it yet
+            public int Submissions;
             public Frame(int chunks, int capacity, int materials)
             {
                 Chunks = new GraphicsBuffer(GraphicsBuffer.Target.Structured, chunks, 32);
@@ -81,13 +84,32 @@ namespace DigBlocks.Client.Rendering
             }
             public void Dispose() { foreach (var batch in Batches) batch?.Dispose(); Chunks.Dispose(); }
         }
+        //one camera's view of the geometry: its own cull output, multi-buffered so the GPU keeps reading the
+        //previous visible set while the next is built. The main camera's slot lives as long as the renderer;
+        //a secondary camera builds one the first frame it culls for itself and gives it back once it stops.
+        private sealed class CameraSlot
+        {
+            public Camera Camera;
+            public Frame[] Frames;
+            public Frame Last;
+            public int DrawnFrame = int.MinValue;
+        }
+        private struct Submission
+        {
+            public Camera Camera;
+            public Frame Frame;
+            public int FrameCount;
+        }
 
         private readonly TerrainRenderSettings settings;
         private readonly ChunkOcclusionGraph occlusionGraph;
         private readonly MeshRangeAllocator allocator;
         private readonly GraphicsBuffer geometry, tints, marker;
         private readonly Material[] materials;
-        private readonly Frame[] frames;
+        private readonly CameraSlot primary;
+        private readonly List<CameraSlot> secondaries = new();
+        private readonly List<Camera> cameraScratch = new();
+        private readonly List<Submission> submissions = new();
         private readonly Upload[] uploads;
         private readonly MeshRangeAllocator.Allocation[] meshes;
         private NativeArray<ChunkGpuData> chunks;
@@ -99,18 +121,23 @@ namespace DigBlocks.Client.Rendering
         private static readonly int DstBlendId = Shader.PropertyToID("_DigBlocksDstBlend");
         private static readonly int ZWriteId = Shader.PropertyToID("_DigBlocksZWrite");
         private static readonly int ZTestId = Shader.PropertyToID("_DigBlocksZTest");
-        private Frame lastFrame, submittedFrame;
-        private Camera submittedCamera;
+        //a slot outlives a few idle frames so an editor viewport that skips a repaint keeps its buffers
+        private const int SecondarySlotIdleFrames = 60;
+        private TerrainSecondaryCameraCulling secondaryCulling;
+        private bool secondaryFailed;
         private int epoch;
         private int uploadFrame = -1, bytesThisFrame;
         private bool disposed;
+        //cleared by a user setting or by an allocation failure; the main camera always draws
+        public bool SecondaryCameraRendering { get; set; } = true;
         public int LiveQuads { get; private set; }
         public int AllocatedQuads => allocator.Allocated;
         public long UploadedBytes { get; private set; }
         public int DeferredUploads { get; private set; }
         public int ResidentGraphNodes => occlusionGraph.ResidentCount;
-        public int CameraVisibleChunks => occlusionGraph.CameraVisibleCount;
-        public int GraphCulledChunks => occlusionGraph.GraphCulledCount;
+        //recorded from the main camera's pass only; a secondary viewport culls for itself without reporting
+        public int CameraVisibleChunks { get; private set; }
+        public int GraphCulledChunks { get; private set; }
         public int CameraVisibleQuads { get; private set; }
 
         public TerrainRenderer(CompiledBlockContent content, TerrainRenderSettings settings)
@@ -144,8 +171,9 @@ namespace DigBlocks.Client.Rendering
                         if (tint.Key == content.TintKeys[i]) colors[i] = (Vector4)tint.Color.linear;
                 tints = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 256, 16);
                 tints.SetData(colors);
-                frames = new Frame[settings.FrameSlots];
-                for (int i = 0; i < frames.Length; i++) frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
+                primary = new CameraSlot { Frames = new Frame[settings.FrameSlots] };
+                for (int i = 0; i < primary.Frames.Length; i++) primary.Frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
+                SecondaryCameraRendering = settings.SecondaryCameraRendering;
                 uploads = new Upload[settings.UploadSlots];
                 for (int i = 0; i < uploads.Length; i++) uploads[i] = new Upload();
                 uploadKernel = settings.Compute.FindKernel("Upload"); cullKernel = settings.Compute.FindKernel("Cull");
@@ -165,7 +193,7 @@ namespace DigBlocks.Client.Rendering
             if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 || settings.MaxChunks < 1 || settings.MaxChunks > 4096 ||
                 settings.QuadCapacity < 2 * GreedyMesherJob.MaximumQuads || settings.QuadCapacity > 16 * 1024 * 1024 ||
                 settings.UploadBytesPerFrame < GreedyMesherJob.MaximumQuads * PackedQuad.Stride ||
-                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.UploadSlots < 1 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
+                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 1 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
                 throw new InvalidOperationException("Invalid terrain resource budgets.");
             foreach (var definition in content.Materials)
             {
@@ -266,37 +294,78 @@ namespace DigBlocks.Client.Rendering
             }
         }
 
+        //mirroring costs nothing extra: the secondary camera is handed the main camera's own visible set,
+        //so the holes it left behind become visible from outside its frustum
+        public void SetSecondaryCameraCulling(TerrainSecondaryCameraCulling mode) => secondaryCulling = mode;
+
         public void ClearMeshes()
         {
             epoch++;
             for (int i = 0; i < meshes.Length; i++) Replace((uint)i, int3.zero, null);
             occlusionGraph.Clear();
-            CameraVisibleQuads = 0;
+            CameraVisibleQuads = 0; CameraVisibleChunks = 0; GraphCulledChunks = 0;
         }
 
         public void SetGraphReady(bool ready) => occlusionGraph.SetReady(ready);
 
-        public void UpdateCameraVisibility(float3 cameraPosition)
+        public void UpdateCameraVisibility(float3 cameraPosition) => UpdateCameraVisibility(cameraPosition, true);
+
+        //the graph holds one visible set at a time, so each camera culls into it and uploads the result
+        //before the next camera overwrites it
+        private void UpdateCameraVisibility(float3 cameraPosition, bool record)
         {
             occlusionGraph.Cull(cameraPosition, settings.ChunkOcclusionCulling);
-            CameraVisibleQuads = 0;
+            int visibleQuads = 0;
             for (int i = 0; i < chunks.Length; i++)
             {
                 var data = chunks[i];
                 data.CameraVisible = occlusionGraph.IsCameraVisible(i) ? 1u : 0u;
                 chunks[i] = data;
-                if (data.CameraVisible != 0 && meshes[i] != null) CameraVisibleQuads += meshes[i].Count;
+                if (data.CameraVisible != 0 && meshes[i] != null) visibleQuads += meshes[i].Count;
             }
+            if (!record) return;
+            CameraVisibleQuads = visibleQuads;
+            CameraVisibleChunks = occlusionGraph.CameraVisibleCount;
+            GraphCulledChunks = occlusionGraph.GraphCulledCount;
         }
 
         public void Draw(Camera camera)
         {
             if (disposed || camera == null || !camera.isActiveAndEnabled) return;
             PollUploads();
-            UpdateCameraVisibility(camera.transform.position);
+            ResolveStrandedSubmissions();
+            primary.Camera = camera;
+            DrawCamera(primary, camera, true);
+            if (SecondaryCameraRendering && !secondaryFailed)
+            {
+                cameraScratch.Clear();
+                TerrainCameraSet.Collect(camera, cameraScratch);
+                for (int i = 0; i < cameraScratch.Count; i++) DrawSecondary(cameraScratch[i]);
+                cameraScratch.Clear();
+            }
+            RetireSecondaries();
+        }
+
+        private void DrawSecondary(Camera camera)
+        {
+            if (secondaryCulling == TerrainSecondaryCameraCulling.MirrorMain)
+            {
+                //submitting the main camera frame again shows this viewport exactly what that camera kept
+                var mirrored = primary.Last;
+                if (mirrored != null && mirrored.Epoch == epoch && mirrored.References.Count > 0) Submit(mirrored, camera);
+                return;
+            }
+            var slot = SlotFor(camera);
+            if (slot != null) DrawCamera(slot, camera, false);
+        }
+
+        private void DrawCamera(CameraSlot slot, Camera camera, bool isPrimary)
+        {
+            slot.DrawnFrame = Time.frameCount;
+            UpdateCameraVisibility(camera.transform.position, isPrimary);
             Frame frame = null;
-            foreach (var candidate in frames)
-                if (candidate.Completion.Ready) { frame = candidate; break; }
+            foreach (var candidate in slot.Frames)
+                if (candidate.Submissions == 0 && candidate.Completion.Ready) { frame = candidate; break; }
             if (frame != null)
             {
                 foreach (var reference in frame.References) allocator.Release(reference);
@@ -333,13 +402,23 @@ namespace DigBlocks.Client.Rendering
                     command.CopyCounterValue(batch.Visible, batch.Args, 4);
                 }
                 Graphics.ExecuteCommandBuffer(command);
-                lastFrame = frame;
+                slot.Last = frame;
             }
-            else frame = lastFrame;
+            else frame = slot.Last;
             if (frame == null || frame.Epoch != epoch || frame.References.Count == 0) return;
-            //a fallback draw can overlap the old token's callback. Never let that callback complete the new draw.
-            if (!frame.Completion.Ready) frame.Completion = new Completion();
-            frame.Completion.Pending();
+            Submit(frame, camera);
+        }
+
+        private void Submit(Frame frame, Camera camera)
+        {
+            if (frame.Submissions == 0)
+            {
+                //a fallback draw can overlap the old token callback. Never let that callback complete the new draw.
+                if (!frame.Completion.Ready) frame.Completion = new Completion();
+                frame.Completion.Pending();
+            }
+            frame.Submissions++;
+            submissions.Add(new Submission { Camera = camera, Frame = frame, FrameCount = Time.frameCount });
             for (int i = 0; i < frame.Batches.Length; i++)
             {
                 bool shadows = (i & 1) != 0;
@@ -351,20 +430,91 @@ namespace DigBlocks.Client.Rendering
                 batch.Properties.SetBuffer("_Tints", tints);
                 var parameters = new RenderParams(materials[i / 2])
                 {
-                    camera = camera, worldBounds = frame.Bounds, matProps = batch.Properties,
+                    camera = camera, layer = TerrainCameraSet.TerrainLayer, worldBounds = frame.Bounds, matProps = batch.Properties,
                     shadowCastingMode = shadows ? ShadowCastingMode.ShadowsOnly : ShadowCastingMode.Off, receiveShadows = true
                 };
                 Graphics.RenderPrimitivesIndirect(parameters, MeshTopology.Triangles, batch.Args);
             }
-            submittedFrame = frame; submittedCamera = camera;
+        }
+
+        private CameraSlot SlotFor(Camera camera)
+        {
+            for (int i = 0; i < secondaries.Count; i++) if (secondaries[i].Camera == camera) return secondaries[i];
+            var slot = new CameraSlot { Camera = camera, Frames = new Frame[settings.SecondaryFrameSlots] };
+            try
+            {
+                for (int i = 0; i < slot.Frames.Length; i++) slot.Frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
+            }
+            catch (Exception error)
+            {
+                //an extra viewport is never worth taking the session down with it
+                Release(slot);
+                secondaryFailed = true;
+                Debug.LogException(new InvalidOperationException("Terrain could not allocate cull buffers for a secondary camera; extra viewports are disabled.", error));
+                return null;
+            }
+            secondaries.Add(slot);
+            return slot;
+        }
+
+        //buffers are handed back once the viewport has been idle a while and the GPU has finished with them
+        private void RetireSecondaries()
+        {
+            for (int i = secondaries.Count - 1; i >= 0; i--)
+            {
+                var slot = secondaries[i];
+                if (slot.Camera != null && Time.frameCount - slot.DrawnFrame < SecondarySlotIdleFrames) continue;
+                bool busy = false;
+                foreach (var frame in slot.Frames)
+                    if (frame.Submissions > 0 || !frame.Completion.Ready) { busy = true; break; }
+                if (busy) continue;
+                secondaries.RemoveAt(i);
+                Release(slot);
+            }
+        }
+
+        private void Release(CameraSlot slot)
+        {
+            if (slot.Frames == null) return;
+            foreach (var frame in slot.Frames)
+            {
+                if (frame == null) continue;
+                foreach (var reference in frame.References) allocator.Release(reference);
+                frame.References.Clear();
+                frame.Dispose();
+            }
+            slot.Frames = null; slot.Last = null;
         }
 
         private void EndCamera(ScriptableRenderContext context, Camera camera)
         {
-            if (camera != submittedCamera || submittedFrame == null) return;
-            command.Clear(); submittedFrame.Completion.Insert(command, marker);
-            context.ExecuteCommandBuffer(command);
-            submittedFrame = null; submittedCamera = null;
+            for (int i = submissions.Count - 1; i >= 0; i--)
+            {
+                if (submissions[i].Camera != camera) continue;
+                var frame = submissions[i].Frame;
+                submissions.RemoveAt(i);
+                //the last camera holding the frame closes it; a mirrored frame outlives the camera that built it
+                if (--frame.Submissions > 0) continue;
+                command.Clear(); frame.Completion.Insert(command, marker);
+                context.ExecuteCommandBuffer(command);
+            }
+        }
+
+        //a camera that never reached the pipeline, such as a hidden scene view, would otherwise hold its
+        //frame pending forever and drain the ring
+        private void ResolveStrandedSubmissions()
+        {
+            bool queued = false;
+            for (int i = submissions.Count - 1; i >= 0; i--)
+            {
+                if (submissions[i].FrameCount == Time.frameCount) continue;
+                var frame = submissions[i].Frame;
+                submissions.RemoveAt(i);
+                if (--frame.Submissions > 0) continue;
+                if (!queued) { command.Clear(); queued = true; }
+                frame.Completion.Insert(command, marker);
+            }
+            if (queued) Graphics.ExecuteCommandBuffer(command);
         }
 
         //call only after the final submitted camera frame; ordinary streaming never waits for GPU completion.
@@ -377,7 +527,9 @@ namespace DigBlocks.Client.Rendering
         }
         private void ReleaseResources()
         {
-            if (frames != null) foreach (var frame in frames) frame?.Dispose();
+            if (primary?.Frames != null) foreach (var frame in primary.Frames) frame?.Dispose();
+            foreach (var slot in secondaries) if (slot.Frames != null) foreach (var frame in slot.Frames) frame?.Dispose();
+            secondaries.Clear(); submissions.Clear();
             if (uploads != null) foreach (var upload in uploads) upload?.Dispose();
             if (materials != null) foreach (var material in materials) if (material != null) UnityEngine.Object.Destroy(material);
             geometry?.Dispose(); tints?.Dispose(); marker?.Dispose();

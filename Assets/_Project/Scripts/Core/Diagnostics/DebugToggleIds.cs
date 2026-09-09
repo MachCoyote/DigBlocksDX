@@ -8,5 +8,7 @@ namespace DigBlocks.Core.Diagnostics
         public static readonly DebugToggleId Fullbright = new DebugToggleId("Fullbright");
 
         public static readonly DebugToggleId Overdraw = new DebugToggleId("Overdraw");
+
+        public static readonly DebugToggleId SecondaryCameraCulling = new DebugToggleId("SecondaryCameraCulling");
     }
 }
