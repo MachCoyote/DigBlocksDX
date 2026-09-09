@@ -42,6 +42,18 @@ The preflight covers both APIs; integrated world tests currently run on DX12. No
 
 Fresh verification: 81 affected EditMode tests passed, followed by the added fragmented-capacity benchmark test (passed); three targeted PlayMode tests passed together. Lean workflow validation and whitespace checks passed. Warmed Burst schedule-plus-completion averages over 10 samples were 1.416 ms uniform (6 quads / 72 bytes), 2.189 ms checkerboard (98,304 / 1,179,648), and 3.767 ms random (32,943 / 395,316). These editor microbenchmarks include job dispatch/completion overhead and are not GPU or whole-frame measurements.
 
+## Debug views
+
+The client debug menu drives three terrain views. `TerrainDebugBinder` pushes them into shader globals — `_DigBlocksWireframeMode`, `_DigBlocksWireframeThickness`, `_DigBlocksWireframeColor`, `_DigBlocksFullbright`, `_DigBlocksOverdrawMode` and `_DigBlocksOverdrawStep` — rather than into material authoring or a second material, and clears them on disposal so the globals never outlive a session.
+
+Wireframe is screen-space triangle edges. Packed quads are drawn as a non-indexed triangle list, so `SV_VertexID % 3` names a triangle corner exactly and `TerrainVertex` can emit true barycentrics with no index buffer, geometry shader or extra vertex data. `TerrainWireframe` turns those into edge coverage with `fwidth`, which keeps a constant screen-space line width at any distance. Mode 1 blends the wire colour over the shaded surface after fog; mode 2 additionally clips everything but the wires. The clip runs in the forward, depth and depth-normals passes together, so a depth prepass cannot prime a solid surface that the lit pass then hides behind.
+
+Fullbright returns the authored surface colour — texture sample, block tint and material base colour — with no lighting, ambient, shadowing or fog. It is a branch around `UniversalFragmentPBR` rather than a separate pass, so it costs one comparison when off.
+
+Overdraw counts fragments instead of shading them. The forward pass turns additive and each surviving fragment contributes `_DigBlocksOverdrawStep`, so the colour buffer holds the layer count scaled by that step. The default step is linear `(1, 0.09, 0.02)`: red saturates on the first layer and green then blue follow, so stacked layers read red, orange, yellow, white as the sum saturates on display. It is a heat ramp rather than a per-layer palette — a true rainbow needs a nonlinear count-to-colour remap, which fixed-function blending cannot do and which would cost a resolve pass.
+
+Blend and depth state come from material properties (`_DigBlocksSrcBlend`, `_DigBlocksDstBlend`, `_DigBlocksZWrite`, `_DigBlocksZTest`) because render state cannot read shader globals. That half is applied by `TerrainRenderService` to the session's own material clones, alongside forcing a black camera clear so zero layers reads as zero. Mode 1 counts every geometry layer with `ZTest Always` and depth writes off, showing the world's full depth complexity; mode 2 keeps normal depth state so only fragments that actually won the depth test — the shading the GPU paid for — are counted. Wireframe clipping is suppressed while overdraw is active so it cannot remove the fragments being counted.
+
 ## Authored material templates
 
 Each `TerrainRenderSettings.Materials` entry binds a material key to a source Material asset and its texture array. The default source is `Assets/_Project/Materials/Terrain/Opaque.mat`. Edit its Base color (RGB), Smoothness, and Metallic properties in the Inspector. Defaults preserve the previous rendering (white, 0.15, 0). The shader consumes these properties through its per-material constant buffer.

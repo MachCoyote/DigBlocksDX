@@ -9,5 +9,7 @@ namespace DigBlocks.Client.UI
         public static readonly MenuId Loading = new MenuId("Loading");
 
         public static readonly MenuId Pause = new MenuId("Pause");
+
+        public static readonly MenuId Debug = new MenuId("Debug");
     }
 }

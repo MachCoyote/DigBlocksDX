@@ -35,6 +35,10 @@ namespace DigBlocks.Client.UI
         private MenuRetentionPolicy retention = MenuRetentionPolicy.Retain;
 
         [SerializeField]
+        [Tooltip("Clear it for informational overlays so they never take the selected control from the menu beneath.")]
+        private bool takesNavigationFocus = true;
+
+        [SerializeField]
         [Tooltip("Stretches the instantiated root to fill its layer. Clear it for menus that own their own layout.")]
         private bool stretchRootToLayer = true;
 
@@ -68,7 +72,8 @@ namespace DigBlocks.Client.UI
                 blocksGameplayInput,
                 showsCursor,
                 backBehavior,
-                retention);
+                retention,
+                takesNavigationFocus);
 
             registration = new MenuRegistration(
                 new MenuId(menuId.Trim()),

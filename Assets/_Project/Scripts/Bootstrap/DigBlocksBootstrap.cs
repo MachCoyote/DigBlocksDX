@@ -228,7 +228,7 @@ namespace DigBlocks.Bootstrap
                 services.Add(new TerrainFixtureService(() => server.World, content.Registry, client == null ? null : () => client.World));
             if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
                 services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
-                    () => presentation?.GameplayInputAvailable ?? false));
+                    () => presentation?.GameplayInputAvailable ?? false, presentation?.DebugOptions));
             return services;
         }
 

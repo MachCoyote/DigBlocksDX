@@ -6,6 +6,12 @@ Shader "DigBlocks/Terrain"
         [MainColor] _BaseColor("Base color", Color) = (1,1,1,1)
         _Smoothness("Smoothness", Range(0,1)) = 0.15
         _Metallic("Metallic", Range(0,1)) = 0
+        //forward render state, switched at runtime for the additive overdraw view; render state
+        //reads material properties only, so these cannot be shader globals like the other debug views
+        [HideInInspector] _DigBlocksSrcBlend("Source blend", Float) = 1
+        [HideInInspector] _DigBlocksDstBlend("Destination blend", Float) = 0
+        [HideInInspector] _DigBlocksZWrite("Depth write", Float) = 1
+        [HideInInspector] _DigBlocksZTest("Depth test", Float) = 4
     }
     SubShader
     {
@@ -23,6 +29,9 @@ Shader "DigBlocks/Terrain"
         {
             Name "ForwardLit"
             Tags { "LightMode"="UniversalForwardOnly" }
+            Blend [_DigBlocksSrcBlend] [_DigBlocksDstBlend]
+            ZWrite [_DigBlocksZWrite]
+            ZTest [_DigBlocksZTest]
             HLSLPROGRAM
             #pragma vertex TerrainVertex
             #pragma fragment Fragment
@@ -36,19 +45,43 @@ Shader "DigBlocks/Terrain"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             half4 Fragment(TerrainVaryings i) : SV_Target
             {
-                InputData input = (InputData)0;
-                input.positionWS = i.positionWS; input.positionCS = i.positionCS;
-                input.normalWS = i.normalWS; input.viewDirectionWS = GetWorldSpaceNormalizeViewDir(i.positionWS);
-                input.shadowCoord = TransformWorldToShadowCoord(i.positionWS);
-                input.bakedGI = SampleSH(i.normalWS); input.shadowMask = 1;
-                input.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.positionCS);
-                input.vertexLighting = VertexLighting(i.positionWS, i.normalWS);
-                SurfaceData surface = (SurfaceData)0;
-                surface.albedo = SAMPLE_TEXTURE2D_ARRAY(_BlockTextures, sampler_BlockTextures, i.uv, i.layer).rgb * _Tints[i.tint].rgb * _BaseColor.rgb;
-                surface.alpha = 1; surface.normalTS = half3(0,0,1); surface.occlusion = 1;
-                surface.smoothness = _Smoothness; surface.metallic = _Metallic;
-                half4 color = UniversalFragmentPBR(input, surface);
-                color.rgb = MixFog(color.rgb, i.fog);
+                //overdraw counts fragments rather than shading them: the pass is additive, so each
+                //surviving fragment contributes one step and the buffer holds the layer count
+                if (_DigBlocksOverdrawMode > 0.5)
+                {
+                    return half4(_DigBlocksOverdrawStep.rgb, 0);
+                }
+
+                //clips the interior in wireframe-only mode, so this runs before the lighting cost
+                float wire = TerrainWireframe(i.barycentric);
+                half3 albedo = SAMPLE_TEXTURE2D_ARRAY(_BlockTextures, sampler_BlockTextures, i.uv, i.layer).rgb
+                    * _Tints[i.tint].rgb * _BaseColor.rgb;
+                half4 color;
+
+                if (_DigBlocksFullbright > 0.5)
+                {
+                    //the authored surface colour with no lighting, ambient, shadowing or fog
+                    color = half4(albedo, 1);
+                }
+                else
+                {
+                    InputData input = (InputData)0;
+                    input.positionWS = i.positionWS; input.positionCS = i.positionCS;
+                    input.normalWS = i.normalWS; input.viewDirectionWS = GetWorldSpaceNormalizeViewDir(i.positionWS);
+                    input.shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+                    input.bakedGI = SampleSH(i.normalWS); input.shadowMask = 1;
+                    input.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.positionCS);
+                    input.vertexLighting = VertexLighting(i.positionWS, i.normalWS);
+                    SurfaceData surface = (SurfaceData)0;
+                    surface.albedo = albedo;
+                    surface.alpha = 1; surface.normalTS = half3(0,0,1); surface.occlusion = 1;
+                    surface.smoothness = _Smoothness; surface.metallic = _Metallic;
+                    color = UniversalFragmentPBR(input, surface);
+                    color.rgb = MixFog(color.rgb, i.fog);
+                }
+
+                //wires sit on top of fog so they stay readable at distance
+                color.rgb = lerp(color.rgb, _DigBlocksWireframeColor.rgb, wire * _DigBlocksWireframeColor.a);
                 return color;
             }
             ENDHLSL
@@ -86,7 +119,12 @@ Shader "DigBlocks/Terrain"
             HLSLPROGRAM
             #pragma vertex TerrainVertex
             #pragma fragment DepthFragment
-            half4 DepthFragment(TerrainVaryings i) : SV_Target { return i.positionCS.z; }
+            half4 DepthFragment(TerrainVaryings i) : SV_Target
+            {
+                //the depth passes must agree with the lit pass, or wireframe-only would be depth-primed solid
+                TerrainWireframe(i.barycentric);
+                return i.positionCS.z;
+            }
             ENDHLSL
         }
         Pass
@@ -100,6 +138,7 @@ Shader "DigBlocks/Terrain"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             half4 NormalFragment(TerrainVaryings i) : SV_Target
             {
+                TerrainWireframe(i.barycentric);
                 #if defined(_GBUFFER_NORMALS_OCT)
                 float2 packed = PackNormalOctQuadEncode(i.normalWS);
                 return half4(PackFloat2To888(saturate(packed * 0.5 + 0.5)), 0);

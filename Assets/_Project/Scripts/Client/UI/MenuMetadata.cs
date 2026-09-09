@@ -8,7 +8,8 @@ namespace DigBlocks.Client.UI
             bool blocksGameplayInput,
             bool showsCursor,
             MenuBackBehavior backBehavior,
-            MenuRetentionPolicy retention)
+            MenuRetentionPolicy retention,
+            bool takesNavigationFocus = true)
         {
             Layer = layer;
             BlocksInteractionUnderneath = blocksInteractionUnderneath;
@@ -16,6 +17,7 @@ namespace DigBlocks.Client.UI
             ShowsCursor = showsCursor;
             BackBehavior = backBehavior;
             Retention = retention;
+            TakesNavigationFocus = takesNavigationFocus;
         }
 
         public MenuLayer Layer { get; }
@@ -30,6 +32,10 @@ namespace DigBlocks.Client.UI
         public MenuBackBehavior BackBehavior { get; }
 
         public MenuRetentionPolicy Retention { get; }
+
+        //when false the menu never becomes the focus target, so a purely informational overlay
+        //cannot steal the selected control from the interactive menu beneath it
+        public bool TakesNavigationFocus { get; }
 
         public static MenuMetadata ForLayer(MenuLayer layer)
         {

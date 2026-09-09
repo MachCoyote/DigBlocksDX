@@ -6,6 +6,13 @@ StructuredBuffer<uint3> _Geometry;
 StructuredBuffer<ChunkData> _Chunks;
 StructuredBuffer<uint> _Visible;
 StructuredBuffer<float4> _Tints;
+//debug view globals, driven by the client debug menu rather than by material authoring
+float _DigBlocksWireframeMode;
+float _DigBlocksWireframeThickness;
+float4 _DigBlocksWireframeColor;
+float _DigBlocksFullbright;
+float _DigBlocksOverdrawMode;
+float4 _DigBlocksOverdrawStep;
 TEXTURE2D_ARRAY(_BlockTextures);
 SAMPLER(sampler_BlockTextures);
 void DecodeTerrain(uint vertex, uint instance, out float3 position, out float3 normal, out float2 uv, out uint layer, out uint tint)
@@ -37,6 +44,7 @@ struct TerrainVaryings
     nointerpolation uint layer : TEXCOORD3;
     nointerpolation uint tint : TEXCOORD4;
     float fog : TEXCOORD5;
+    float3 barycentric : TEXCOORD6;
 };
 TerrainVaryings TerrainVertex(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
 {
@@ -44,6 +52,26 @@ TerrainVaryings TerrainVertex(uint vertex : SV_VertexID, uint instance : SV_Inst
     DecodeTerrain(vertex, instance, o.positionWS, o.normalWS, o.uv, o.layer, o.tint);
     o.positionCS = TransformWorldToHClip(o.positionWS);
     o.fog = ComputeFogFactor(o.positionCS.z);
+    //terrain quads are non-indexed triangle lists, so a vertex owns exactly one triangle corner
+    uint corner = vertex % 3u;
+    o.barycentric = float3(corner == 0u, corner == 1u, corner == 2u);
     return o;
+}
+//screen-space triangle edge coverage; discards interior fragments when only the wires should exist
+float TerrainWireframe(float3 barycentric)
+{
+    //overdraw replaces shading outright, so wires must not clip the fragments it is counting
+    if (_DigBlocksWireframeMode < 0.5 || _DigBlocksOverdrawMode > 0.5)
+    {
+        return 0;
+    }
+    float3 width = fwidth(barycentric);
+    float3 edge = smoothstep(0, width * max(_DigBlocksWireframeThickness, 0.001), barycentric);
+    float wire = 1 - min(min(edge.x, edge.y), edge.z);
+    if (_DigBlocksWireframeMode > 1.5)
+    {
+        clip(wire - 0.01);
+    }
+    return wire;
 }
 #endif

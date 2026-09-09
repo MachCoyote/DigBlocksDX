@@ -31,3 +31,13 @@ MonoBehaviour:
     backBehavior: 0
     retention: 1
     stretchRootToLayer: 1
+  - menuId: Debug
+    prefab: {fileID: 3742441531527917625, guid: a255efe7870c8794fb17d806e3fc7d65, type: 3}
+    layer: 1
+    blocksInteractionUnderneath: 0
+    blocksGameplayInput: 0
+    showsCursor: 0
+    backBehavior: 3
+    retention: 1
+    stretchRootToLayer: 1
+    takesNavigationFocus: 0

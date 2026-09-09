@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 7963498522565091557}
+  - component: {fileID: 4583303907683995478}
   m_Layer: 0
   m_Name: DebugMenu
   m_TagString: Untagged
@@ -29,7 +30,7 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 8220709207751369005}
-  - {fileID: 3714182440551721485}
+  - {fileID: 8860860828351152254}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -37,7 +38,23 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!1 &5890876670122605983
+--- !u!114 &4583303907683995478
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3742441531527917625}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a92836646ebf4c7cb50107f24eeacca3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: DigBlocks.Client.UI::DigBlocks.Client.UI.Views.DebugMenuView
+  initialSelection: {fileID: 0}
+  canvasGroup: {fileID: 0}
+  titleLabel: {fileID: 4284657402965275582}
+  toggleLabel: {fileID: 4329895168761810939}
+--- !u!1 &4030304243322030654
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -45,23 +62,23 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 8220709207751369005}
-  - component: {fileID: 8363400439238277307}
-  - component: {fileID: 4284657402965275582}
+  - component: {fileID: 8860860828351152254}
+  - component: {fileID: 4396867527651300956}
+  - component: {fileID: 4329895168761810939}
   m_Layer: 0
-  m_Name: Title
+  m_Name: Control Lines
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!224 &8220709207751369005
+--- !u!224 &8860860828351152254
 RectTransform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5890876670122605983}
+  m_GameObject: {fileID: 4030304243322030654}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -69,30 +86,30 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 7963498522565091557}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
+  m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 415, y: 520}
-  m_SizeDelta: {x: -840, y: -1060}
+  m_AnchoredPosition: {x: -960.00006, y: -555}
+  m_SizeDelta: {x: 1900, y: 1030}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!222 &8363400439238277307
+--- !u!222 &4396867527651300956
 CanvasRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5890876670122605983}
+  m_GameObject: {fileID: 4030304243322030654}
   m_CullTransparentMesh: 1
---- !u!114 &4284657402965275582
+--- !u!114 &4329895168761810939
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5890876670122605983}
+  m_GameObject: {fileID: 4030304243322030654}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
   m_Material: {fileID: 0}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
@@ -102,7 +119,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'DEBUG
+  m_text: 'DEBUG CONTROL LINES
 
 '
   m_isRightToLeft: 0
@@ -176,7 +193,7 @@ MonoBehaviour:
   m_hasFontAssetChanged: 0
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
---- !u!1 &9050074467809846533
+--- !u!1 &5890876670122605983
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -184,23 +201,23 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 3714182440551721485}
-  - component: {fileID: 8585347026177330958}
-  - component: {fileID: 8090716986556090493}
+  - component: {fileID: 8220709207751369005}
+  - component: {fileID: 8363400439238277307}
+  - component: {fileID: 4284657402965275582}
   m_Layer: 0
-  m_Name: Controls
+  m_Name: Title
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!224 &3714182440551721485
+--- !u!224 &8220709207751369005
 RectTransform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9050074467809846533}
+  m_GameObject: {fileID: 5890876670122605983}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
@@ -210,28 +227,28 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -960.00006, y: -550}
-  m_SizeDelta: {x: 1910.0001, y: 1040}
+  m_AnchoredPosition: {x: -315, y: -65}
+  m_SizeDelta: {x: 610, y: 110}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!222 &8585347026177330958
+--- !u!222 &8363400439238277307
 CanvasRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9050074467809846533}
+  m_GameObject: {fileID: 5890876670122605983}
   m_CullTransparentMesh: 1
---- !u!114 &8090716986556090493
+--- !u!114 &4284657402965275582
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9050074467809846533}
+  m_GameObject: {fileID: 5890876670122605983}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: f4688fdb7df04437aeb418b961361dc5, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Unity.TextMeshPro::TMPro.TextMeshProUGUI
   m_Material: {fileID: 0}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
@@ -241,7 +258,9 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Wireframe View - F8
+  m_text: 'DEBUG
+
+'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 84e1c34652f311341b2b6e9f7d72d379, type: 2}
   m_sharedMaterial: {fileID: -108313902394093115, guid: 84e1c34652f311341b2b6e9f7d72d379, type: 2}
@@ -268,8 +287,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 16
-  m_fontSizeBase: 16
+  m_fontSize: 20
+  m_fontSizeBase: 20
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 18

@@ -6,6 +6,7 @@
     "DigBlocks.Client.UI",
     "DigBlocks.Core",
     "UniTask",
+    "Unity.InputSystem",
     "UnityEngine.UI"
   ],
   "includePlatforms": [

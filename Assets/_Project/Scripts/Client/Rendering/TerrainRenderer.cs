@@ -94,6 +94,10 @@ namespace DigBlocks.Client.Rendering
         private readonly Plane[] planes = new Plane[6];
         private readonly Vector4[] planeVectors = new Vector4[6];
         private readonly int uploadKernel, cullKernel;
+        private static readonly int SrcBlendId = Shader.PropertyToID("_DigBlocksSrcBlend");
+        private static readonly int DstBlendId = Shader.PropertyToID("_DigBlocksDstBlend");
+        private static readonly int ZWriteId = Shader.PropertyToID("_DigBlocksZWrite");
+        private static readonly int ZTestId = Shader.PropertyToID("_DigBlocksZTest");
         private Frame lastFrame, submittedFrame;
         private Camera submittedCamera;
         private int epoch;
@@ -231,6 +235,24 @@ namespace DigBlocks.Client.Rendering
             };
             if (allocation != null) LiveQuads += allocation.Count;
         }
+        //blend and depth state come from material properties rather than shader globals, so the
+        //overdraw view is applied to this session's material clones instead of set once for the process
+        public void SetOverdrawMode(TerrainOverdrawMode mode)
+        {
+            if (disposed || materials == null) return;
+            bool counting = mode != TerrainOverdrawMode.Off;
+            //counting every layer means ignoring depth entirely; counting shaded fragments keeps it
+            bool ignoreDepth = mode == TerrainOverdrawMode.AllLayers;
+            foreach (var material in materials)
+            {
+                if (material == null) continue;
+                material.SetFloat(SrcBlendId, (float)BlendMode.One);
+                material.SetFloat(DstBlendId, (float)(counting ? BlendMode.One : BlendMode.Zero));
+                material.SetFloat(ZWriteId, ignoreDepth ? 0 : 1);
+                material.SetFloat(ZTestId, (float)(ignoreDepth ? CompareFunction.Always : CompareFunction.LessEqual));
+            }
+        }
+
         public void ClearMeshes()
         {
             epoch++;

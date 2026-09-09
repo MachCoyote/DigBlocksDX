@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using DigBlocks.Core.Diagnostics;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Session;
 using DigBlocks.Voxels.Definitions;
@@ -18,21 +19,26 @@ namespace DigBlocks.Client.Rendering
         private readonly Func<bool> inputAvailable;
         private readonly CompiledBlockContent content;
         private readonly TerrainRenderSettings settings;
+        private readonly IDebugOptions debugOptions;
         private GameObject root;
         private TerrainView view;
         private TerrainMeshingSystem system;
         private TerrainRenderer renderer;
         private ChunkMeshScheduler scheduler;
+        private Camera camera;
         private Camera previousCamera;
         private bool previousCameraEnabled;
+        private Color defaultBackground;
+        private CameraClearFlags defaultClearFlags;
         private Exception failure;
         public string Name => nameof(TerrainRenderService);
         public string ReadinessDescription => "Building chunk meshes...";
         public int BuiltChunks => scheduler?.BuiltCount ?? 0;
         public int Quads => renderer?.LiveQuads ?? 0;
 
-        public TerrainRenderService(Func<World> getWorld, CompiledBlockContent content, TerrainRenderSettings settings, Func<bool> inputAvailable)
-        { this.getWorld = getWorld; this.content = content; this.settings = settings; this.inputAvailable = inputAvailable; }
+        public TerrainRenderService(Func<World> getWorld, CompiledBlockContent content, TerrainRenderSettings settings, Func<bool> inputAvailable,
+            IDebugOptions debugOptions = null)
+        { this.getWorld = getWorld; this.content = content; this.settings = settings; this.inputAvailable = inputAvailable; this.debugOptions = debugOptions; }
 
         public async UniTask StartAsync(CancellationToken cancellationToken)
         {
@@ -48,15 +54,18 @@ namespace DigBlocks.Client.Rendering
                 previousCamera = Camera.main;
                 previousCameraEnabled = previousCamera != null && previousCamera.enabled;
                 if (previousCamera != null) previousCamera.enabled = false;
-                var camera = root.AddComponent<Camera>();
+                camera = root.AddComponent<Camera>();
                 camera.tag = "MainCamera";
                 camera.nearClipPlane = 0.1f; camera.farClipPlane = settings.RenderDistance + 64;
                 camera.backgroundColor = new Color(0.45f, 0.67f, 0.9f);
                 camera.GetUniversalAdditionalCameraData().renderPostProcessing = false;
                 camera.transform.position = new Vector3(62, 48, -62);
                 camera.transform.LookAt(new Vector3(8, 6, 8));
+                defaultBackground = camera.backgroundColor; defaultClearFlags = camera.clearFlags;
                 view = root.AddComponent<TerrainView>();
                 view.Initialize(camera, renderer, inputAvailable);
+                if (debugOptions != null) debugOptions.StateChanged += OnDebugStateChanged;
+                ApplyOverdrawMode();
                 system = world.GetExistingSystemManaged<TerrainMeshingSystem>();
                 if (system == null)
                 {
@@ -70,6 +79,23 @@ namespace DigBlocks.Client.Rendering
                 await StopAsync(CancellationToken.None);
                 throw;
             }
+        }
+
+        private void OnDebugStateChanged(DebugToggleId id, int state)
+        {
+            if (id == DebugToggleIds.Overdraw) ApplyOverdrawMode();
+        }
+
+        //the shader globals are set process-wide by TerrainDebugBinder; blend and depth state come from
+        //material properties, so the session applies that half to its own clones and its own camera
+        private void ApplyOverdrawMode()
+        {
+            var mode = TerrainDebugBinder.ReadOverdrawMode(debugOptions);
+            renderer?.SetOverdrawMode(mode);
+            if (camera == null) return;
+            //counting is additive, so anything but a black clear reads as phantom layers
+            camera.clearFlags = mode == TerrainOverdrawMode.Off ? defaultClearFlags : CameraClearFlags.SolidColor;
+            camera.backgroundColor = mode == TerrainOverdrawMode.Off ? defaultBackground : Color.black;
         }
 
         private void Tick()
@@ -100,6 +126,7 @@ namespace DigBlocks.Client.Rendering
         public async UniTask StopAsync(CancellationToken cancellationToken)
         {
             if (system != null) system.Tick = null;
+            if (debugOptions != null) debugOptions.StateChanged -= OnDebugStateChanged;
             if (view != null) view.enabled = false;
             scheduler?.Dispose(); scheduler = null;
             //allow queued indirect submissions to reach the pipeline before releasing their buffers.
@@ -107,7 +134,7 @@ namespace DigBlocks.Client.Rendering
             renderer?.Dispose(); renderer = null;
             if (previousCamera != null) previousCamera.enabled = previousCameraEnabled;
             if (root != null) UnityEngine.Object.Destroy(root);
-            root = null; view = null;
+            root = null; view = null; camera = null;
         }
     }
 

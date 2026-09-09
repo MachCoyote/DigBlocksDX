@@ -20,6 +20,8 @@ DigBlocksBootstrap            composition root, process shutdown
 ├── ApplicationFlowController Intro, Title, Loading, Playing, Leaving
 ├── MenuCoordinator           screen, overlay and modal navigation, focus
 │   └── MenuRegistry          MenuId to factory and metadata
+├── DebugMenuController       debug overlay, debug keybinds, toggle cycling
+│   └── DebugOptions          toggle state, readable across assemblies
 └── ClientInputRouter         gameplay action availability and cursor state
 ```
 
@@ -62,7 +64,8 @@ entry supplies the metadata the coordinator needs:
 | Blocks Interaction Underneath | when cleared, the menu directly beneath stays interactive |
 | Blocks Gameplay Input | contributes to disabling gameplay actions |
 | Shows Cursor | contributes to releasing and showing the cursor |
-| Back Behavior | `None` absorbs back, `Close` closes the menu, `ViewHandled` calls `IMenuBackHandler` |
+| Back Behavior | `None` absorbs back, `Close` closes the menu, `ViewHandled` calls `IMenuBackHandler`, `PassThrough` routes back to the menu beneath |
+| Takes Navigation Focus | when cleared, the menu never becomes the focus target and cannot steal the selected control |
 | Retention | `Retain` keeps the instance disabled for reuse, `Destroy` disposes it |
 | Stretch Root To Layer | fills the layer; clear it for menus that own their own layout |
 
@@ -88,8 +91,8 @@ need no canvas or event system of their own.
 ## Wiring an authored menu
 
 1. Put a view component on the prefab root: `TitleMenuView`, `LoadingView`,
-   `PauseMenuView` or `IntroView`, and assign its controls. The view adds its own
-   button listeners, so no `onClick` entries are needed in the inspector.
+   `PauseMenuView`, `IntroView` or `DebugMenuView`, and assign its controls. The view
+   adds its own button listeners, so no `onClick` entries are needed in the inspector.
 2. Create a catalog with Assets > Create > DigBlocks > Menu Catalog and add an entry
    for the prefab.
 3. Assign the catalog to `Menu Catalog` on the `DigBlocks Bootstrap` object in the
@@ -98,6 +101,32 @@ need no canvas or event system of their own.
 Registering `Intro` makes launch show it and advance to title on skip or completion;
 leaving it unregistered goes straight to title. `Pause` belongs on the overlay layer
 with `ViewHandled` back behavior so cancel input resumes rather than merely closing.
+
+## Debug overlay
+
+`F3` shows and hides a debug overlay registered as the `Debug` menu. It is an
+overlay in the same coordinator as every other menu, but it is authored to be
+purely informational: it blocks neither gameplay input nor the cursor, leaves the
+menu beneath interactive, never takes navigation focus, and passes back through.
+That last pair is what lets it sit above the pause menu without swallowing
+`Escape` or the pause menu's selected button.
+
+Toggles are declared in code in `DebugToggleCatalog`, each one a display name, a
+key and its cycle of states. `DebugMenuController` builds one standalone
+`InputAction` per toggle, so debug keys never depend on which action maps the
+input router has enabled, and enables them only while the overlay is bound — the
+menu key works at any time, the toggles only while the menu is on screen. The
+view is populated from the same declarations, one `Name - Key` line per toggle,
+so a new toggle is a catalog entry and nothing else.
+
+State lives in `DebugOptions` in Core, keyed by `DebugToggleId`. That keeps the
+switchboard readable by subsystems that must not depend on client UI:
+`TerrainDebugBinder` in `DigBlocks.Client.Rendering` observes the rendering
+toggles and drives the terrain shader's globals, and `TerrainRenderService`
+observes the overdraw toggle for the part that globals cannot carry. The current
+toggles are `F8` wireframe (off, over the surface, wires only), `F7` fullbright,
+and `F6` overdraw (off, every geometry layer, shaded fragments only). See
+`docs/chunk-meshing-rendering.md` for what each one does to the shader.
 
 ## Input and pause
 
@@ -123,12 +152,19 @@ without leaking a network world. Covered by tests: screen replacement, duplicate
 overlay suppression, back routing and absorption, covered-menu interaction loss and
 restoration, retained-instance reuse, reported input requirements, explicit session
 readiness, rejected overlapping sessions, startup failure rollback, and a fresh
-session after leaving.
+session after leaving. The debug overlay adds coverage for back routing over a
+pass-through overlay, back reported unhandled when only pass-through menus are open,
+a non-blocking overlay leaving the menu beneath interactive, the input requirements
+it reports, toggle state cycling and notification, and the catalog invariants that
+every toggle has a unique identifier, a unique key and at least two states.
 
 ## Not in this slice
 
 Worlds and settings menus, confirmation and error dialogs, richer loading progress,
 per-menu presenters, the code-authored menu builder API, mod scripting and its
-permission model, menu pooling, and simulation freeze itself. Play enters the fixed
+permission model, menu pooling, and simulation freeze itself. Debug toggles are
+declared in code rather than authored as assets, hold no state across runs, and
+report no live values; a debug HUD with frame timings, chunk counts and position
+readouts is a later slice on the same overlay. Play enters the fixed
 development world; world selection later feeds the same
 `ApplicationFlowController` and `GameSessionController` path.

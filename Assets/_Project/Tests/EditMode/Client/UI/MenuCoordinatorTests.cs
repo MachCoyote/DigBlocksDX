@@ -14,6 +14,7 @@ namespace DigBlocks.Client.Tests.UI
         private static readonly MenuId WorldsId = new MenuId("Worlds");
         private static readonly MenuId PauseId = new MenuId("Pause");
         private static readonly MenuId DialogId = new MenuId("Dialog");
+        private static readonly MenuId DebugId = new MenuId("Debug");
 
         private FakeUIRoot uiRoot;
         private MenuRegistry registry;
@@ -197,6 +198,58 @@ namespace DigBlocks.Client.Tests.UI
             isolated.Dispose();
         }
 
+        [Test]
+        public void Back_SkipsAPassThroughOverlayAndReachesTheMenuBeneath()
+        {
+            RegisterScreen(TitleId, MenuRetentionPolicy.Retain);
+            FakeMenuView pause = RegisterOverlay(PauseId, MenuBackBehavior.Close);
+            FakeMenuView debug = RegisterPassThroughOverlay(DebugId);
+
+            Run(coordinator.ShowScreenAsync(TitleId, CancellationToken.None));
+            Run(coordinator.PushOverlayAsync(PauseId, CancellationToken.None));
+            Run(coordinator.PushOverlayAsync(DebugId, CancellationToken.None));
+
+            Assert.That(Run(coordinator.BackAsync(CancellationToken.None)), Is.True);
+            Assert.That(pause.CloseCount, Is.EqualTo(1));
+            Assert.That(debug.CloseCount, Is.EqualTo(0));
+            Assert.That(coordinator.IsOpen(DebugId), Is.True);
+        }
+
+        [Test]
+        public void Back_WithOnlyAPassThroughOverlay_ReportsUnhandled()
+        {
+            RegisterPassThroughOverlay(DebugId);
+
+            Run(coordinator.PushOverlayAsync(DebugId, CancellationToken.None));
+
+            //unhandled back is what lets the debug overlay coexist with pausing the game
+            Assert.That(Run(coordinator.BackAsync(CancellationToken.None)), Is.False);
+        }
+
+        [Test]
+        public void PassThroughOverlay_LeavesTheMenuBeneathInteractive()
+        {
+            FakeMenuView title = RegisterScreen(TitleId, MenuRetentionPolicy.Retain);
+            RegisterPassThroughOverlay(DebugId);
+
+            Run(coordinator.ShowScreenAsync(TitleId, CancellationToken.None));
+            Run(coordinator.PushOverlayAsync(DebugId, CancellationToken.None));
+
+            Assert.That(title.IsInteractable, Is.True);
+        }
+
+        [Test]
+        public void PassThroughOverlay_DoesNotBlockGameplayInputOrShowTheCursor()
+        {
+            RegisterPassThroughOverlay(DebugId);
+
+            Run(coordinator.PushOverlayAsync(DebugId, CancellationToken.None));
+
+            Assert.That(coordinator.InputRequirements.AnyMenuOpen, Is.True);
+            Assert.That(coordinator.InputRequirements.BlocksGameplayInput, Is.False);
+            Assert.That(coordinator.InputRequirements.ShowsCursor, Is.False);
+        }
+
         private FakeMenuView RegisterScreen(MenuId id, MenuRetentionPolicy retention)
         {
             var metadata = new MenuMetadata(
@@ -218,6 +271,20 @@ namespace DigBlocks.Client.Tests.UI
                 showsCursor: true,
                 backBehavior,
                 MenuRetentionPolicy.Retain);
+            return Register(id, metadata);
+        }
+
+        //matches the debug overlay: informational, never focused, and transparent to back
+        private FakeMenuView RegisterPassThroughOverlay(MenuId id)
+        {
+            var metadata = new MenuMetadata(
+                MenuLayer.Overlay,
+                blocksInteractionUnderneath: false,
+                blocksGameplayInput: false,
+                showsCursor: false,
+                MenuBackBehavior.PassThrough,
+                MenuRetentionPolicy.Retain,
+                takesNavigationFocus: false);
             return Register(id, metadata);
         }
 

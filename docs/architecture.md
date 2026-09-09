@@ -81,6 +81,7 @@ transport-specific implementation.
 | NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
+| Debug menu, debug toggles, or the terrain debug views | `Scripts/Client/Debugging`, `Scripts/Core/Diagnostics`, then `docs/debug-menu-implementation.md` |
 | Application state, play/pause/quit intent | `Scripts/Client/Flow`, then `Scripts/Client/Input` |
 | Session lifetime or world readiness | `Scripts/Bootstrap/Session`, then `Scripts/Core/Session` |
 | Architecture or dependency question | this document, then the generated assembly map and relevant `.asmdef` |
@@ -121,7 +122,7 @@ presentation and authoring code must be removable from this build.
 ## Assembly Boundaries
 
 - `DigBlocks.Core` owns application lifecycle, launch options, logging contracts,
-  and other framework-independent primitives.
+  the debug toggle switchboard, and other framework-independent primitives.
 - `DigBlocks.Bootstrap` is the Unity composition root. It chooses the launch mode
   and constructs the ordered application services.
 - `DigBlocks.Client` owns client-world coordination, GameObject presentation

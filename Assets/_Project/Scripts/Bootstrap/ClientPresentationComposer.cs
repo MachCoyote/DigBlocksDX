@@ -1,8 +1,11 @@
 using System.Threading;
+using DigBlocks.Client.Debugging;
 using DigBlocks.Client.Flow;
 using DigBlocks.Client.Input;
+using DigBlocks.Client.Rendering;
 using DigBlocks.Client.UI;
 using DigBlocks.Client.UI.Placeholders;
+using DigBlocks.Core.Diagnostics;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Launch;
 using DigBlocks.Core.Session;
@@ -48,7 +51,17 @@ namespace DigBlocks.Bootstrap
                 logger,
                 applicationLifetime);
 
-            return new ClientPresentation(uiRoot, registry, menus, input, flow);
+            //the debug switchboard is application-lifetime state: sessions come and go beneath it
+            var debugOptions = new DebugOptions();
+            var debugMenu = new DebugMenuController(
+                menus,
+                debugOptions,
+                DebugToggleCatalog.Default,
+                logger,
+                applicationLifetime);
+            var terrainDebug = new TerrainDebugBinder(debugOptions);
+
+            return new ClientPresentation(uiRoot, registry, menus, input, flow, debugMenu, debugOptions, terrainDebug);
         }
     }
 }

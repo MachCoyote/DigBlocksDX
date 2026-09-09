@@ -9,6 +9,9 @@ namespace DigBlocks.Client.UI
         Close,
 
         //the view handles back through IMenuBackHandler
-        ViewHandled
+        ViewHandled,
+
+        //back ignores this menu entirely and is routed to the menu beneath it
+        PassThrough
     }
 }

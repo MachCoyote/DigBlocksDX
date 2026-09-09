@@ -154,7 +154,7 @@ namespace DigBlocks.Client.UI
         {
             using (await gate.EnterAsync(cancellationToken))
             {
-                MenuEntry target = TopInteractiveEntry();
+                MenuEntry target = TopBackTarget();
                 if (target == null)
                 {
                     return false;
@@ -432,17 +432,22 @@ namespace DigBlocks.Client.UI
             activeStack.AddRange(modals);
         }
 
-        private MenuEntry TopInteractiveEntry()
+        //the back target is the topmost menu that actually participates in back; pass-through
+        //menus such as debug overlays are stepped over so back keeps reaching real navigation
+        private MenuEntry TopBackTarget()
         {
             BuildActiveStack();
 
             for (int index = activeStack.Count - 1; index >= 0; index--)
             {
                 MenuEntry entry = activeStack[index];
-                if (entry.State != MenuLifecycleState.Closing)
+                if (entry.State == MenuLifecycleState.Closing
+                    || entry.Metadata.BackBehavior == MenuBackBehavior.PassThrough)
                 {
-                    return entry;
+                    continue;
                 }
+
+                return entry;
             }
 
             return null;
@@ -468,7 +473,7 @@ namespace DigBlocks.Client.UI
 
                 entry.View.SetInteractable(allowInteraction);
 
-                if (allowInteraction && focusTarget == null)
+                if (allowInteraction && focusTarget == null && entry.Metadata.TakesNavigationFocus)
                 {
                     focusTarget = entry;
                 }
