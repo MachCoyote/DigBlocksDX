@@ -1,7 +1,7 @@
 #pragma kernel Upload
 #pragma kernel Cull
 
-struct ChunkData { float3 origin; uint start; uint count; uint active; uint reserved0; uint reserved1; };
+struct ChunkData { float3 origin; uint start; uint count; uint active; uint cameraVisible; uint reserved; };
 StructuredBuffer<uint3> _Upload;
 RWStructuredBuffer<uint3> _GeometryWrite;
 uint _UploadStart, _UploadCount;
@@ -24,6 +24,7 @@ void Cull(uint chunk : SV_GroupID, uint lane : SV_GroupIndex)
     if (chunk >= _ChunkCount) return;
     ChunkData data = _Chunks[chunk];
     if (data.active == 0 || data.count == 0) return;
+    if (_ShadowOnly == 0 && data.cameraVisible == 0) return;
     float3 center = data.origin + 16;
     float3 distance = max(abs(center - _CameraPosition) - 16, 0);
     if (dot(distance, distance) > _RangeSquared) return;

@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.IO;
 using UnityEngine;
 
 namespace DigBlocks.Client.Rendering.Tests
@@ -19,6 +20,16 @@ namespace DigBlocks.Client.Rendering.Tests
                 Assert.That(material.GetFloat("_Metallic"), Is.Zero);
             }
             finally { Object.DestroyImmediate(material); }
+        }
+
+        [Test]
+        public void ComputeCullerRejectsCameraHiddenChunksButKeepsShadowBatchesConservative()
+        {
+            string source = File.ReadAllText("Assets/_Project/Shaders/Terrain/TerrainStreaming.compute");
+
+            StringAssert.Contains("_ShadowOnly == 0 && data.cameraVisible == 0", source);
+            StringAssert.Contains("if (_ShadowOnly == 0)", source);
+            StringAssert.Contains("shadow batches conservatively retain off-camera chunks", source);
         }
     }
 }

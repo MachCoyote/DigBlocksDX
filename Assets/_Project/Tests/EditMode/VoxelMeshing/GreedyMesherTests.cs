@@ -151,20 +151,45 @@ namespace DigBlocks.Voxels.Meshing.Tests
         [Test]
         public void FragmentedChunkFitsCapacityAndRecordsRepresentativeJobCosts()
         {
+            using var visibilityVisited = new NativeArray<byte>(ChunkLayout.Volume, Allocator.Persistent);
+            using var visibilityQueue = new NativeArray<int>(ChunkLayout.Volume, Allocator.Persistent);
+            using var visibilityResult = new NativeReference<ulong>(Allocator.Persistent);
+            JobHandle Visibility() => new ChunkVisibilityJob
+            {
+                Voxels = voxels, Attributes = attributes.AsReadOnly(), Visited = visibilityVisited,
+                Queue = visibilityQueue, Result = visibilityResult
+            }.Schedule();
+            JobHandle Combined()
+            {
+                var mesh = new GreedyMesherJob { Voxels = voxels, Attributes = attributes.AsReadOnly(), Appearance = appearance.AsReadOnly(),
+                    Mask = mask, Output = output, Slot = 7, Seed = 123, ChunkPosition = new int3(-1, 0, 2) }.Schedule();
+                return JobHandle.CombineDependencies(mesh, Visibility());
+            }
+
             var report = new System.Text.StringBuilder("Burst schedule + completion, warmed editor, 32-cube input, 10 samples per layout. Not GPU/frame timings.\n");
-            for (int layout = 0; layout < 3; layout++)
+            for (int layout = 0; layout < 4; layout++)
             {
                 for (int i = 0; i < voxels.Length; i++) voxels[i] = 0;
                 var random = new System.Random(73);
                 for (int y = 0; y < 32; y++) for (int z = 0; z < 32; z++) for (int x = 0; x < 32; x++)
                     voxels[GreedyMesherJob.Index(new int3(x, y, z))] = layout == 0 ? 1u :
-                        layout == 1 ? (uint)((x + y + z) & 1) : (uint)random.Next(2);
-                Build();
-                if (layout == 1) Assert.That(output.Length, Is.EqualTo(ChunkLayout.Volume / 2 * 6));
-                var timer = System.Diagnostics.Stopwatch.StartNew();
+                        layout == 1 ? (x == 16 ? 1u : 0u) : layout == 2 ? (uint)((x + y + z) & 1) : (uint)random.Next(2);
+                Build(); Visibility().Complete(); Combined().Complete();
+                if (layout == 2) Assert.That(output.Length, Is.EqualTo(ChunkLayout.Volume / 2 * 6));
+
+                var meshTimer = System.Diagnostics.Stopwatch.StartNew();
                 for (int sample = 0; sample < 10; sample++) Build();
-                timer.Stop();
-                report.AppendLine($"{new[] { "uniform", "checkerboard", "random" }[layout]}: {timer.Elapsed.TotalMilliseconds / 10:F3} ms, {output.Length} quads, {output.Length * PackedQuad.Stride} bytes");
+                meshTimer.Stop();
+                var visibilityTimer = System.Diagnostics.Stopwatch.StartNew();
+                for (int sample = 0; sample < 10; sample++) Visibility().Complete();
+                visibilityTimer.Stop();
+                var combinedTimer = System.Diagnostics.Stopwatch.StartNew();
+                for (int sample = 0; sample < 10; sample++) Combined().Complete();
+                combinedTimer.Stop();
+
+                report.AppendLine($"{new[] { "uniform", "plane", "checkerboard", "random" }[layout]}: " +
+                    $"mesh {meshTimer.Elapsed.TotalMilliseconds / 10:F3} ms, visibility {visibilityTimer.Elapsed.TotalMilliseconds / 10:F3} ms, " +
+                    $"combined {combinedTimer.Elapsed.TotalMilliseconds / 10:F3} ms, {output.Length} quads, {output.Length * PackedQuad.Stride} bytes");
             }
             System.IO.Directory.CreateDirectory(".utmp");
             System.IO.File.WriteAllText(".utmp/terrain-mesher-benchmark.txt", report.ToString());

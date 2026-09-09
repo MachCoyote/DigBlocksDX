@@ -29,6 +29,9 @@ namespace DigBlocks.Client.Rendering
             public readonly ResidentChunk[] Stamps = new ResidentChunk[7];
             public readonly NativeArray<uint> Padded = new(GreedyMesherJob.PaddedVolume, Allocator.Persistent);
             public readonly NativeArray<ulong> Mask = new(1024, Allocator.Persistent);
+            public readonly NativeArray<byte> VisibilityVisited = new(ChunkLayout.Volume, Allocator.Persistent);
+            public readonly NativeArray<int> VisibilityQueue = new(ChunkLayout.Volume, Allocator.Persistent);
+            public readonly NativeReference<ulong> Visibility = new(Allocator.Persistent);
             public NativeList<PackedQuad> Output = new(GreedyMesherJob.MaximumQuads, Allocator.Persistent);
             public JobHandle Handle;
             public Entry Entry;
@@ -40,7 +43,7 @@ namespace DigBlocks.Client.Rendering
             {
                 Handle.Complete();
                 foreach (var source in Sources) source.Dispose();
-                Padded.Dispose(); Mask.Dispose(); Output.Dispose();
+                Padded.Dispose(); Mask.Dispose(); VisibilityVisited.Dispose(); VisibilityQueue.Dispose(); Visibility.Dispose(); Output.Dispose();
             }
         }
 
@@ -101,11 +104,11 @@ namespace DigBlocks.Client.Rendering
                 {
                     entry.Pending = false; worker.Entry = null; StaleResults++; continue;
                 }
-                if (!renderer.TryPublish(entry.Slot, entry.Address.Position, worker.Output.AsArray())) continue;
+                if (!renderer.TryPublish(entry.Slot, entry.Address.Position, worker.Output.AsArray(), new ChunkFaceConnectivity(worker.Visibility.Value))) continue;
                 if (entry.Built == 0) BuiltCount++;
                 entry.Built = worker.Version; entry.Pending = false; worker.Entry = null;
             }
-            if (store == null) return;
+            if (store == null) { renderer.SetGraphReady(false); return; }
             foreach (var worker in workers)
             {
                 if (worker.Entry != null) continue;
@@ -120,6 +123,7 @@ namespace DigBlocks.Client.Rendering
                 if (best == null) break;
                 Schedule(worker, best);
             }
+            renderer.SetGraphReady(store.DataReady && BuiltCount == entries.Count && IsCurrent);
         }
 
         private void Schedule(Worker worker, Entry entry)
@@ -138,12 +142,18 @@ namespace DigBlocks.Client.Rendering
                 Center = worker.Sources[0], Down = worker.Sources[1], Up = worker.Sources[2], North = worker.Sources[3],
                 South = worker.Sources[4], West = worker.Sources[5], East = worker.Sources[6], Present = worker.Present, Output = worker.Padded
             }.Schedule(GreedyMesherJob.PaddedVolume, 256, worker.Handle);
-            worker.Handle = new GreedyMesherJob
+            var mesh = new GreedyMesherJob
             {
                 Voxels = worker.Padded, Mask = worker.Mask, Output = worker.Output, Appearance = appearance.AsReadOnly(),
                 Attributes = attributes.AsReadOnly().Solids, ChunkPosition = entry.Address.Position, Slot = entry.Slot,
                 Seed = settings.VisualSeed ^ entry.Address.World
             }.Schedule(padding);
+            var visibility = new ChunkVisibilityJob
+            {
+                Voxels = worker.Padded, Attributes = attributes.AsReadOnly().Solids, Visited = worker.VisibilityVisited,
+                Queue = worker.VisibilityQueue, Result = worker.Visibility
+            }.Schedule(padding);
+            worker.Handle = JobHandle.CombineDependencies(mesh, visibility);
             worker.Entry = entry; entry.Pending = true;
         }
 
@@ -161,6 +171,7 @@ namespace DigBlocks.Client.Rendering
 
         private void OnChanged(ChunkAddress address)
         {
+            renderer.SetGraphReady(false);
             if (!entries.TryGetValue(address, out var entry))
             {
                 if (freeSlots.Count == 0) throw new InvalidOperationException("Terrain chunk capacity is smaller than admitted residency.");
@@ -176,7 +187,7 @@ namespace DigBlocks.Client.Rendering
         }
         private void OnReset()
         {
-            entries.Clear(); ResetSlots(); BuiltCount = 0; renderer.ClearMeshes();
+            entries.Clear(); ResetSlots(); BuiltCount = 0; renderer.SetGraphReady(false); renderer.ClearMeshes();
         }
         private void ResetSlots() { freeSlots.Clear(); for (int i = settings.MaxChunks - 1; i >= 0; i--) freeSlots.Push((uint)i); }
         private static ChunkAddress Neighbor(ChunkAddress address, int index)

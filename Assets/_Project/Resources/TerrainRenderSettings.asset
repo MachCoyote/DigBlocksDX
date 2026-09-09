@@ -28,4 +28,5 @@ MonoBehaviour:
   FrameSlots: 3
   RenderDistance: 512
   VisualSeed: 1663821211
+  ChunkOcclusionCulling: 1
   CastShadows: 1

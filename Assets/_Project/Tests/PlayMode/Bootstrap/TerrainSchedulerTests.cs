@@ -65,5 +65,80 @@ namespace DigBlocks.Bootstrap.PlayModeTests
                 } while (!scheduler.IsCurrent);
             }
         }
+
+        [UnityTest]
+        public IEnumerator CompleteReplicaGraphCullsBehindBarrierAndFailsOpenDuringRebuild()
+        {
+            var content = BlockContentProvider.Load();
+            var settings = Object.Instantiate(Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"));
+            Assert.That(settings.ChunkOcclusionCulling, Is.True);
+            using var world = new World("Terrain occlusion verification");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(content.Registry);
+            store.EnableReplicas();
+            using var renderer = new TerrainRenderer(content, settings);
+            using var scheduler = new ChunkMeshScheduler(content, settings, renderer);
+            var anchor = new ChunkAddress(1, int3.zero);
+            var interest = new ChunkInterest(1, anchor, 1, 0);
+            uint stone = content.Registry.LookupSolid("digblocks:stone");
+
+            store.SetReplicaInterest(interest);
+            foreach (var address in interest.Addresses())
+            {
+                var cells = new uint[ChunkLayout.Volume];
+                if (address.Position.x == 0) System.Array.Fill(cells, stone);
+                else if (address.Position.Equals(new int3(1, 0, 0))) cells[ChunkLayout.Index(new int3(16, 16, 16))] = stone;
+                store.PublishReplica(interest.Epoch, new ChunkImage(address, 1, 1, cells, new uint[ChunkLayout.Volume]));
+            }
+            yield return Settle();
+
+            renderer.UpdateCameraVisibility(new float3(-16, 16, 16));
+            Assert.That(renderer.ResidentGraphNodes, Is.EqualTo(interest.Count));
+            Assert.That(renderer.CameraVisibleChunks, Is.EqualTo(3));
+            Assert.That(renderer.GraphCulledChunks, Is.EqualTo(1));
+            int enabledQuads = renderer.CameraVisibleQuads;
+            settings.ChunkOcclusionCulling = false;
+            renderer.UpdateCameraVisibility(new float3(-16, 16, 16));
+            Assert.That(renderer.CameraVisibleChunks, Is.EqualTo(4));
+            Assert.That(renderer.CameraVisibleQuads, Is.EqualTo(renderer.LiveQuads));
+            int disabledQuads = renderer.CameraVisibleQuads;
+            settings.ChunkOcclusionCulling = true;
+
+            var opened = new uint[ChunkLayout.Volume];
+            System.Array.Fill(opened, stone);
+            for (int x = 0; x < ChunkLayout.Edge; x++) opened[ChunkLayout.Index(new int3(x, 16, 16))] = 0;
+            store.PublishReplica(interest.Epoch, new ChunkImage(anchor, 1, 2, opened, new uint[ChunkLayout.Volume]));
+            renderer.UpdateCameraVisibility(new float3(-16, 16, 16));
+            Assert.That(renderer.GraphCulledChunks, Is.Zero, "Dirty graph state must fail open.");
+            Assert.That(renderer.CameraVisibleChunks, Is.EqualTo(4));
+
+            yield return Settle();
+            renderer.UpdateCameraVisibility(new float3(-16, 16, 16));
+            Assert.That(renderer.GraphCulledChunks, Is.Zero, "The opened tunnel reconnects the chunk behind the barrier.");
+            Assert.That(renderer.CameraVisibleChunks, Is.EqualTo(4));
+
+            store.ClearReplicas();
+            renderer.UpdateCameraVisibility(new float3(-16, 16, 16));
+            Assert.That(renderer.ResidentGraphNodes, Is.Zero);
+            Assert.That(renderer.CameraVisibleChunks, Is.Zero);
+
+            System.IO.Directory.CreateDirectory(".utmp");
+            System.IO.File.WriteAllText(".utmp/terrain-occlusion-fixture.txt",
+                $"Complete 3x3 replica fixture, camera in west chunk.\n" +
+                $"enabled: resident {interest.Count}, visible chunks 3, culled chunks 1, camera-visible quads {enabledQuads}\n" +
+                $"disabled: resident {interest.Count}, visible chunks 4, culled chunks 0, camera-visible quads {disabledQuads}\n" +
+                "CPU graph visibility before distance/frustum/material GPU compaction; not a frame-time measurement.\n");
+            Object.Destroy(settings);
+
+            IEnumerator Settle()
+            {
+                double deadline = Time.realtimeSinceStartupAsDouble + 15;
+                do
+                {
+                    scheduler.Tick(store, new float3(-16, 16, 16));
+                    Assert.That(Time.realtimeSinceStartupAsDouble, Is.LessThan(deadline));
+                    yield return null;
+                } while (!scheduler.IsCurrent);
+            }
+        }
     }
 }

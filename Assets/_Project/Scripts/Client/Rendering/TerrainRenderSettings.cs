@@ -19,6 +19,7 @@ namespace DigBlocks.Client.Rendering
         [Range(2, 5)] public int FrameSlots = 3;
         [Min(32)] public float RenderDistance = 512;
         public uint VisualSeed = 0x632be59b;
+        public bool ChunkOcclusionCulling = true;
         public bool CastShadows = true;
     }
 }

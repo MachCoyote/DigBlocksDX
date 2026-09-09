@@ -14,7 +14,7 @@ namespace DigBlocks.Client.Rendering
         private struct ChunkGpuData
         {
             public float3 Origin;
-            public uint Start, Count, Active, Reserved0, Reserved1;
+            public uint Start, Count, Active, CameraVisible, Reserved;
         }
         private sealed class Completion
         {
@@ -83,6 +83,7 @@ namespace DigBlocks.Client.Rendering
         }
 
         private readonly TerrainRenderSettings settings;
+        private readonly ChunkOcclusionGraph occlusionGraph;
         private readonly MeshRangeAllocator allocator;
         private readonly GraphicsBuffer geometry, tints, marker;
         private readonly Material[] materials;
@@ -107,6 +108,10 @@ namespace DigBlocks.Client.Rendering
         public int AllocatedQuads => allocator.Allocated;
         public long UploadedBytes { get; private set; }
         public int DeferredUploads { get; private set; }
+        public int ResidentGraphNodes => occlusionGraph.ResidentCount;
+        public int CameraVisibleChunks => occlusionGraph.CameraVisibleCount;
+        public int GraphCulledChunks => occlusionGraph.GraphCulledCount;
+        public int CameraVisibleQuads { get; private set; }
 
         public TerrainRenderer(CompiledBlockContent content, TerrainRenderSettings settings)
         {
@@ -114,6 +119,7 @@ namespace DigBlocks.Client.Rendering
             try
             {
                 Validate(content, settings);
+                occlusionGraph = new ChunkOcclusionGraph(settings.MaxChunks);
                 allocator = new MeshRangeAllocator(settings.QuadCapacity);
                 meshes = new MeshRangeAllocator.Allocation[settings.MaxChunks];
                 chunks = new NativeArray<ChunkGpuData>(settings.MaxChunks, Allocator.Persistent);
@@ -184,11 +190,16 @@ namespace DigBlocks.Client.Rendering
                     throw new NotSupportedException("Custom block models are outside this opaque-cube milestone.");
         }
 
-        public bool TryPublish(uint slot, int3 position, NativeArray<PackedQuad> data)
+        public bool TryPublish(uint slot, int3 position, NativeArray<PackedQuad> data, ChunkFaceConnectivity connectivity)
         {
             PollUploads();
             if (uploadFrame != Time.frameCount) { uploadFrame = Time.frameCount; bytesThisFrame = 0; }
-            if (data.Length == 0) { Replace(slot, position, null); return true; }
+            if (data.Length == 0)
+            {
+                Replace(slot, position, null);
+                occlusionGraph.SetNode((int)slot, position, connectivity, false);
+                return true;
+            }
             int bytes = data.Length * PackedQuad.Stride;
             int replacedCount = meshes[slot]?.Count ?? 0;
             if (bytes > settings.UploadBytesPerFrame - bytesThisFrame ||
@@ -212,7 +223,9 @@ namespace DigBlocks.Client.Rendering
             Graphics.ExecuteCommandBuffer(command);
             allocator.Retain(allocation);
             upload.Allocation = allocation;
-            Replace(slot, position, allocation); UploadedBytes += bytes; bytesThisFrame += bytes;
+            Replace(slot, position, allocation);
+            occlusionGraph.SetNode((int)slot, position, connectivity, true);
+            UploadedBytes += bytes; bytesThisFrame += bytes;
             return true;
         }
         private void PollUploads()
@@ -257,12 +270,30 @@ namespace DigBlocks.Client.Rendering
         {
             epoch++;
             for (int i = 0; i < meshes.Length; i++) Replace((uint)i, int3.zero, null);
+            occlusionGraph.Clear();
+            CameraVisibleQuads = 0;
+        }
+
+        public void SetGraphReady(bool ready) => occlusionGraph.SetReady(ready);
+
+        public void UpdateCameraVisibility(float3 cameraPosition)
+        {
+            occlusionGraph.Cull(cameraPosition, settings.ChunkOcclusionCulling);
+            CameraVisibleQuads = 0;
+            for (int i = 0; i < chunks.Length; i++)
+            {
+                var data = chunks[i];
+                data.CameraVisible = occlusionGraph.IsCameraVisible(i) ? 1u : 0u;
+                chunks[i] = data;
+                if (data.CameraVisible != 0 && meshes[i] != null) CameraVisibleQuads += meshes[i].Count;
+            }
         }
 
         public void Draw(Camera camera)
         {
             if (disposed || camera == null || !camera.isActiveAndEnabled) return;
             PollUploads();
+            UpdateCameraVisibility(camera.transform.position);
             Frame frame = null;
             foreach (var candidate in frames)
                 if (candidate.Completion.Ready) { frame = candidate; break; }
