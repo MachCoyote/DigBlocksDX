@@ -4,6 +4,11 @@
   "references": [
     "DigBlocks.Bootstrap",
     "DigBlocks.Client",
+    "DigBlocks.Client.Rendering",
+    "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Runtime",
+    "DigBlocks.ChunkProtocol",
+    "Unity.Mathematics",
     "DigBlocks.Client.UI",
     "DigBlocks.Core",
     "Unity.Entities",

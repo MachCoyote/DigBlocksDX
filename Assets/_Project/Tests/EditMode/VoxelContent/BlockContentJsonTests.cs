@@ -25,6 +25,21 @@ namespace DigBlocks.Voxels.Content.Tests
         }
 
         [Test]
+        public void PerFaceRandomRotationPolicyLoadsAlongsideFixedRotation()
+        {
+            var content = Load("{\"key\":\"digblocks:grass\",\"material\":\"digblocks:opaque\",\"texture\":1," +
+                "\"randomizeRotation\":true,\"randomizeRotations\":{\"side\":false,\"up\":true},\"rotation\":1}");
+            var faces = content.SolidAppearanceOf(content.Registry.LookupSolid("digblocks:grass")).Faces;
+            Assert.That(faces[(int)BlockFace.Up].RandomizeRotation, Is.True);
+            Assert.That(faces[(int)BlockFace.Down].RandomizeRotation, Is.True);
+            foreach (var direction in new[] { BlockFace.North, BlockFace.South, BlockFace.West, BlockFace.East })
+            {
+                Assert.That(faces[(int)direction].RandomizeRotation, Is.False);
+                Assert.That(faces[(int)direction].Rotation, Is.EqualTo(1));
+            }
+        }
+
+        [Test]
         public void FaceGroupShorthandExpandsBeforeExplicitFaceNames()
         {
             var content = Load("{\"key\":\"digblocks:grass\",\"material\":\"digblocks:opaque\"," +

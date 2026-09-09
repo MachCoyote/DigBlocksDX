@@ -1,7 +1,7 @@
 {
   "name": "DigBlocks.Client.Rendering.Editor",
   "rootNamespace": "DigBlocks.Client.Rendering.Editor",
-  "references": [],
+  "references": ["DigBlocks.Client.Rendering", "Unity.Collections", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"],
   "includePlatforms": [
     "Editor"
   ],

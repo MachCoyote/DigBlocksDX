@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f88b1351759d7ab4bb42a8665419b1bd, type: 3}
+  m_Name: TerrainRenderSettings
+  m_EditorClassIdentifier: DigBlocks.Client.Rendering::DigBlocks.Client.Rendering.TerrainRenderSettings
+  Compute: {fileID: 7200000, guid: 49ffb66f16dce314c8c54dc6fb6eb6ec, type: 3}
+  Materials:
+  - Key: digblocks:opaque
+    Material: {fileID: 2100000, guid: b3b6b8552f434534d87384306752b444, type: 2}
+    Textures: {fileID: 1996329409344997585, guid: 9011223344556677889900112233445b, type: 3}
+  Tints:
+  - Key: digblocks:grass
+    Color: {r: 0.55, g: 0.8, b: 0.3, a: 1}
+  MeshWorkers: 2
+  MaxChunks: 256
+  QuadCapacity: 1048576
+  UploadBytesPerFrame: 4194304
+  UploadSlots: 2
+  FrameSlots: 3
+  RenderDistance: 512
+  VisualSeed: 1663821211
+  CastShadows: 1

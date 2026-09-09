@@ -218,7 +218,8 @@ namespace DigBlocks.Voxels.Definitions
                 byte rotation = (self != null ? self.Rotation : null) ?? overrides.Rotation ?? 0;
                 if (rotation > 3) throw new BlockContentException(stateKey, "Face rotation must be 0-3 quarter turns.");
                 string tint = (self != null ? self.TintKey : null) ?? overrides.TintKey;
-                faces[face] = new BlockFaceAppearance((ushort)texture.Value, rotation, tints.IndexOf(tint));
+                bool randomized = self?.RandomizeRotation ?? overrides.RandomizeRotation ?? false;
+                faces[face] = new BlockFaceAppearance((ushort)texture.Value, rotation, tints.IndexOf(tint), randomized);
             }
             return new BlockStateAppearance(materialIndex, overrides.RandomizeRotation ?? false, faces);
         }

@@ -122,6 +122,25 @@ namespace DigBlocks.Voxels
             return capture;
         }
 
+        //detaches solid data into caller-owned reusable memory; later mutation waits only for this copy.
+        public JobHandle ScheduleSolidCopy(NativeArray<uint> destination, JobHandle dependency = default)
+        {
+            RequireAlive();
+            if (!destination.IsCreated || destination.Length != ChunkLayout.Volume) throw new ArgumentException("Expected a full chunk destination.", nameof(destination));
+            var handle = new SolidCopyJob { Source = solids.AsReadOnly(), Destination = destination }
+                .Schedule(ChunkLayout.Volume, 256, JobHandle.CombineDependencies(readers, dependency));
+            readers = handle;
+            return handle;
+        }
+
+        [BurstCompile]
+        private struct SolidCopyJob : IJobParallelFor
+        {
+            [ReadOnly] public PaletteChannel.ReadView Source;
+            [WriteOnly] public NativeArray<uint> Destination;
+            public void Execute(int index) => Destination[index] = Source.Get(index);
+        }
+
         public void Dispose()
         {
             if (disposed) return;

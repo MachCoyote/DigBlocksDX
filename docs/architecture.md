@@ -254,3 +254,7 @@ ownership, failure handling and the next integration boundary.
 This sequence deliberately establishes connection and world ownership before
 chunk transmission while keeping the chunk model reusable in tests, persistence,
 and offline tools.
+
+## Terrain presentation
+
+The client meshing and indirect rendering milestone is documented in [chunk meshing and terrain rendering](chunk-meshing-rendering.md). `DigBlocks.Voxels.Meshing` owns Burst greedy geometry and packed quad contracts; `DigBlocks.Client.Rendering` owns scheduling, GPU memory, shaders and the inspection camera. Replica publication/reset notifications originate in Voxels.Runtime. Bootstrap composes presentation only for graphical clients and supplies a bounded authoritative development fixture through ordinary replication.

@@ -25,7 +25,7 @@ namespace DigBlocks.Voxels.Content
         };
 
         private static readonly HashSet<string> AppearanceFields = new HashSet<string>(StringComparer.Ordinal)
-            { "material", "texture", "textures", "rotation", "rotations", "tint", "tints", "randomizeRotation" };
+            { "material", "texture", "textures", "rotation", "rotations", "tint", "tints", "randomizeRotation", "randomizeRotations" };
 
         private static readonly HashSet<string> LayerFields = new HashSet<string>(StringComparer.Ordinal)
             { "key", "archetype", "behavior", "model", "tags", "properties", "blockEntity", "drops", "sounds", "states" };
@@ -187,6 +187,11 @@ namespace DigBlocks.Voxels.Content
                 (face, token) => face.Rotation = token.Value<byte>());
             ReadFaceMap(origin, key, root, "tints", appearance,
                 (face, token) => face.TintKey = token.Value<string>());
+            ReadFaceMap(origin, key, root, "randomizeRotations", appearance, (face, token) =>
+            {
+                if (token.Type != JTokenType.Boolean) throw Fail(origin, key, "randomizeRotations values must be booleans.");
+                face.RandomizeRotation = token.Value<bool>();
+            });
             return appearance;
         }
 

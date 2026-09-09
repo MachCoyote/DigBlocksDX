@@ -10,6 +10,10 @@ using DigBlocks.Networking.NetCode;
 using System;
 using System.Threading;
 using UnityEngine;
+using DigBlocks.Client.Rendering;
+using DigBlocks.Client.Runtime;
+using DigBlocks.Server.Runtime;
+using System.Collections.Generic;
 
 namespace DigBlocks.Bootstrap
 {
@@ -33,6 +37,8 @@ namespace DigBlocks.Bootstrap
         [SerializeField]
         [Tooltip("World the play action enters until world selection exists.")]
         private string developmentWorldId = "dev";
+
+        [SerializeField] private bool useTerrainFixture = true;
 
         private CancellationTokenSource lifetimeCancellation;
         private ClientPresentation presentation;
@@ -59,6 +65,7 @@ namespace DigBlocks.Bootstrap
         public INetworkSession NetworkSession => sessions?.FindService<INetworkSession>();
 
         public ChunkCompanionService ChunkCompanion => sessions?.FindService<ChunkCompanionService>();
+        public TerrainRenderService Terrain => sessions?.FindService<TerrainRenderService>();
 
         //application-level entry points for debug tooling and tests; UI reaches flow through view intent
         public void RequestPlay()
@@ -174,7 +181,7 @@ namespace DigBlocks.Bootstrap
 
                 sessions = new GameSessionController(
                     logger,
-                    request => GameServiceComposer.Compose(request.LaunchOptions, logger, network));
+                    request => ComposeSession(request.LaunchOptions, network));
 
                 if (LaunchOptions.Mode == LaunchMode.DedicatedServer)
                 {
@@ -205,6 +212,24 @@ namespace DigBlocks.Bootstrap
                 LastFailure = exception;
                 logger.Log("Startup failed.", GameLogLevel.Error, exception);
             }
+        }
+
+        private IReadOnlyList<IGameService> ComposeSession(LaunchOptions launch, NetworkLaunchSettings network)
+        {
+            var services = new List<IGameService>(GameServiceComposer.Compose(launch, logger, network));
+            var content = BlockContentProvider.Load();
+            ServerRuntime server = null; ClientRuntime client = null;
+            foreach (var service in services)
+            {
+                if (service is ServerRuntime s) server = s;
+                if (service is ClientRuntime c) client = c;
+            }
+            if (server != null && useTerrainFixture)
+                services.Add(new TerrainFixtureService(() => server.World, content.Registry, client == null ? null : () => client.World));
+            if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
+                services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
+                    () => presentation?.GameplayInputAvailable ?? false));
+            return services;
         }
 
         //dedicated servers bypass client UI and application-menu behaviour entirely

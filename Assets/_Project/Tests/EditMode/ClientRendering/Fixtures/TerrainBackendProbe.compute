@@ -1,0 +1,18 @@
+#pragma kernel Cull
+#pragma kernel Upload
+StructuredBuffer<uint3> _UploadSource;
+RWStructuredBuffer<uint3> _Destination;
+[numthreads(32, 1, 1)]
+void Upload(uint id : SV_DispatchThreadID)
+{
+    if (id < 3) _Destination[id] = _UploadSource[id];
+}
+StructuredBuffer<uint3> _Quads;
+AppendStructuredBuffer<uint> _Visible;
+[numthreads(32, 1, 1)]
+void Cull(uint id : SV_DispatchThreadID)
+{
+    if (id >= 3) return;
+    uint x = _Quads[id].x & 63u;
+    if (x < 8u) _Visible.Append(id);
+}

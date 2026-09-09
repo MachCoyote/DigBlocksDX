@@ -1,0 +1,5 @@
+{
+  "name": "DigBlocks.Voxels.Meshing",
+  "references": ["DigBlocks.Voxels", "DigBlocks.Voxels.Appearance", "Unity.Collections", "Unity.Mathematics", "Unity.Burst"],
+  "noEngineReferences": false
+}

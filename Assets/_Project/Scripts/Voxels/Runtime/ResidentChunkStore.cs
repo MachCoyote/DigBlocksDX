@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using DigBlocks.ChunkProtocol;
 using Unity.Entities;
+using Unity.Collections;
+using Unity.Jobs;
 
 namespace DigBlocks.Voxels.Runtime
 {
@@ -74,6 +76,33 @@ namespace DigBlocks.Voxels.Runtime
             ownerThread = Thread.CurrentThread.ManagedThreadId;
         }
         public int Count => chunks.Count;
+        public bool IsDisposed => disposed;
+        public event Action<ChunkAddress> ReplicaChanged;
+        public event Action ReplicasReset;
+
+        public bool TryGetReplicaStamp(ChunkAddress address, out ResidentChunk stamp)
+        {
+            RequireAlive(); stamp = default;
+            if (!replicas || !chunks.TryGetValue(address, out var entry)) return false;
+            stamp = new ResidentChunk { Address = address, Incarnation = entry.Data.Incarnation, Revision = entry.Data.Revision };
+            return true;
+        }
+
+        public void GetReplicaStamps(List<ResidentChunk> destination)
+        {
+            RequireAlive();
+            destination.Clear();
+            if (!replicas) return;
+            foreach (var pair in chunks)
+                destination.Add(new ResidentChunk { Address = pair.Key, Incarnation = pair.Value.Data.Incarnation, Revision = pair.Value.Data.Revision });
+        }
+
+        public JobHandle ScheduleReplicaSolidCopy(ChunkAddress address, NativeArray<uint> destination, JobHandle dependency = default)
+        {
+            RequireAlive();
+            if (!replicas || !chunks.TryGetValue(address, out var entry)) throw new InvalidOperationException("Replica is no longer resident.");
+            return entry.Data.ScheduleSolidCopy(destination, dependency);
+        }
         public int PendingSnapshots => snapshots.Count;
         public int ReadySnapshots
         {
@@ -196,6 +225,7 @@ namespace DigBlocks.Voxels.Runtime
             foreach (var entry in chunks.Values)
             { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
             chunks.Clear(); interest = next;
+            ReplicasReset?.Invoke();
             return true;
         }
 
@@ -207,6 +237,7 @@ namespace DigBlocks.Voxels.Runtime
             foreach (var entry in chunks.Values)
             { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
             chunks.Clear(); interest = null;
+            ReplicasReset?.Invoke();
         }
 
         public bool PublishReplica(ulong epoch, ChunkImage image)
@@ -245,6 +276,7 @@ namespace DigBlocks.Voxels.Runtime
                 throw;
             }
             previous?.Data.Dispose();
+            ReplicaChanged?.Invoke(image.Address);
             return true;
         }
 
@@ -376,6 +408,7 @@ namespace DigBlocks.Voxels.Runtime
             foreach (var entry in chunks.Values)
             { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
             chunks.Clear(); disposed = true;
+            ReplicasReset?.Invoke();
         }
         private void RequireAlive()
         {

@@ -7,6 +7,22 @@ namespace DigBlocks.Voxels.Tests
     public class ChunkDataTests
     {
         [Test]
+        public void ReusableSolidCopySurvivesMutationAndOwnerDisposal()
+        {
+            using var before = new Unity.Collections.NativeArray<uint>(ChunkLayout.Volume, Unity.Collections.Allocator.Persistent);
+            using var after = new Unity.Collections.NativeArray<uint>(ChunkLayout.Volume, Unity.Collections.Allocator.Persistent);
+            using var chunk = new ChunkData(default, 1, 2, 0);
+            var first = chunk.ScheduleSolidCopy(before);
+            chunk.Apply(new[] { new CellEdit(7, 3, 0) }, 3, 0);
+            var second = chunk.ScheduleSolidCopy(after);
+            chunk.Dispose();
+            first.Complete(); second.Complete();
+            Assert.That(before[7], Is.EqualTo(2));
+            Assert.That(after[7], Is.EqualTo(3));
+            Assert.That(after[8], Is.EqualTo(2));
+        }
+
+        [Test]
         public void BatchChangesBothChannelsAtOneRevision()
         {
             using var chunk = new ChunkData(new ChunkAddress(1, new int3(-1, 2, 3)), 7);

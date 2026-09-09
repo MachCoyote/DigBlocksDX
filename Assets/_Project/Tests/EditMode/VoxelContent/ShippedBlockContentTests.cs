@@ -78,17 +78,20 @@ namespace DigBlocks.Voxels.Content.Tests
                 content.SolidAppearanceOf(registry.LookupSolid(key)).Faces[(int)face].Texture;
 
             Assert.That(Slice("digblocks:testblock", BlockFace.North), Is.EqualTo(0));
-            Assert.That(Slice("digblocks:stone", BlockFace.North), Is.EqualTo(1));
-            Assert.That(Slice("digblocks:dirt", BlockFace.North), Is.EqualTo(2));
-            Assert.That(Slice("digblocks:grass_block", BlockFace.Up), Is.EqualTo(3));
-            Assert.That(Slice("digblocks:grass_block", BlockFace.North), Is.EqualTo(4));
-            Assert.That(Slice("digblocks:grass_block", BlockFace.Down), Is.EqualTo(2));
+            Assert.That(Slice("digblocks:stone", BlockFace.North), Is.EqualTo(4));
+            Assert.That(Slice("digblocks:dirt", BlockFace.North), Is.EqualTo(3));
+            Assert.That(Slice("digblocks:grass_block", BlockFace.Up), Is.EqualTo(1));
+            Assert.That(Slice("digblocks:grass_block", BlockFace.North), Is.EqualTo(2));
+            Assert.That(Slice("digblocks:grass_block", BlockFace.Down), Is.EqualTo(3));
             Assert.That(Slice("digblocks:bedrock", BlockFace.North), Is.EqualTo(5));
 
             //only the grass top is tinted, and air carries no appearance row at all.
             var grass = content.SolidAppearanceOf(registry.LookupSolid("digblocks:grass_block"));
             Assert.That(grass.Faces[(int)BlockFace.Up].Tint, Is.EqualTo(1));
             Assert.That(grass.Faces[(int)BlockFace.North].Tint, Is.Zero);
+            Assert.That(grass.Faces[(int)BlockFace.Up].RandomizeRotation, Is.True);
+            Assert.That(grass.Faces[(int)BlockFace.Down].RandomizeRotation, Is.True);
+            Assert.That(grass.Faces[(int)BlockFace.North].RandomizeRotation, Is.False);
             Assert.That(content.SolidAppearanceOf(registry.LookupSolid("digblocks:air")).IsVisible, Is.False);
         }
 

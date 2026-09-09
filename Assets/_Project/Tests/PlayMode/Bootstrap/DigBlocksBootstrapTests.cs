@@ -63,6 +63,12 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             Assert.That(owner.SessionStatus.Phase, Is.EqualTo(GameSessionPhase.Ready));
             Assert.That(owner.HostState, Is.EqualTo(GameHostState.Running));
             Assert.That(owner.NetworkSession, Is.Not.Null);
+            if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Assert.That(owner.Terrain, Is.Not.Null);
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(9));
+                Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
+            }
 
             owner.RequestReturnToTitle();
             yield return WaitForApplicationState(owner, ApplicationState.Title, 30);
@@ -70,6 +76,85 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             Assert.That(owner.SessionStatus.Phase, Is.EqualTo(GameSessionPhase.Idle));
             Assert.That(owner.HostState, Is.EqualTo(GameHostState.Created));
             Assert.That(owner.LastFailure, Is.Null);
+        }
+
+        [UnityTest]
+        public IEnumerator TerrainScene_RendersAndRestarts()
+        {
+            SceneManager.LoadScene("Bootstrap", LoadSceneMode.Single);
+            yield return null;
+            var owner = UnityEngine.Object.FindFirstObjectByType<DigBlocksBootstrap>();
+            yield return WaitForApplicationState(owner, ApplicationState.Title);
+            for (int session = 0; session < 2; session++)
+            {
+                owner.RequestPlay();
+                yield return WaitForApplicationState(owner, ApplicationState.Playing, 30);
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(9));
+                Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
+                for (int frame = 0; frame < 4; frame++) yield return null;
+                Assert.That(owner.Terrain.Quads, Is.GreaterThan(9000), "All nine fixture chunks, including the updated center, must be meshed before Playing.");
+                yield return new WaitForEndOfFrame();
+                var capture = ScreenCapture.CaptureScreenshotAsTexture();
+                try
+                {
+                    var pixels = capture.GetPixels32();
+                    int terrainPixels = 0;
+                    foreach (var pixel in pixels)
+                        if (pixel.g > pixel.b * 1.2f && pixel.g > pixel.r * 1.1f) terrainPixels++;
+                    Assert.That(terrainPixels, Is.GreaterThan(100), "Expected visible grass terrain in the rendered frame.");
+                    System.IO.Directory.CreateDirectory(".utmp");
+                    System.IO.File.WriteAllBytes(".utmp/terrain-world.png", capture.EncodeToPNG());
+                    Debug.Log($"Terrain verification: {owner.Terrain.Quads} packed quads, {terrainPixels} grass pixels, session {session + 1}.");
+                }
+                finally { UnityEngine.Object.Destroy(capture); }
+                owner.RequestReturnToTitle();
+                yield return WaitForApplicationState(owner, ApplicationState.Title, 30);
+                Assert.That(owner.LastFailure, Is.Null);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator TerrainMaterialColorIsRenderedFromAnOwnedClone()
+        {
+            SceneManager.LoadScene("Bootstrap", LoadSceneMode.Single);
+            yield return null;
+            var owner = UnityEngine.Object.FindFirstObjectByType<DigBlocksBootstrap>();
+            yield return WaitForApplicationState(owner, ApplicationState.Title);
+            var settings = Resources.Load<DigBlocks.Client.Rendering.TerrainRenderSettings>("TerrainRenderSettings");
+            var original = settings.Materials[0].Material;
+            var source = new Material(original);
+            settings.Materials[0].Material = source;
+            try
+            {
+                source.SetColor("_BaseColor", Color.black);
+                for (int session = 0; session < 2; session++)
+                {
+                    owner.RequestPlay();
+                    yield return WaitForApplicationState(owner, ApplicationState.Playing, 30);
+                    //changing the template cannot change the already-owned clone; the next session picks it up.
+                    source.SetColor("_BaseColor", Color.white);
+                    for (int frame = 0; frame < 4; frame++) yield return null;
+                    yield return new WaitForEndOfFrame();
+                    var capture = ScreenCapture.CaptureScreenshotAsTexture();
+                    try
+                    {
+                        int grass = 0;
+                        foreach (var pixel in capture.GetPixels32())
+                            if (pixel.g > pixel.b * 1.2f && pixel.g > pixel.r * 1.1f) grass++;
+                        if (session == 0) Assert.That(grass, Is.LessThan(100), "Black material must suppress grass albedo, even after its template changes.");
+                        else Assert.That(grass, Is.GreaterThan(100), "The next clone must inherit the white template.");
+                    }
+                    finally { UnityEngine.Object.Destroy(capture); }
+                    owner.RequestReturnToTitle();
+                    yield return WaitForApplicationState(owner, ApplicationState.Title, 30);
+                    Assert.That(source != null && original != null, Is.True, "Shutdown must not destroy source materials.");
+                }
+            }
+            finally
+            {
+                settings.Materials[0].Material = original;
+                UnityEngine.Object.Destroy(source);
+            }
         }
 
         [UnityTest]

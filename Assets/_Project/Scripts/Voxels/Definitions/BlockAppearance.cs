@@ -31,6 +31,7 @@ namespace DigBlocks.Voxels.Definitions
         public int? Texture;
         //quarter turns applied to the face texture, 0-3.
         public byte? Rotation;
+        public bool? RandomizeRotation;
         public string TintKey;
 
         public FaceAppearanceOverrides Clone() => (FaceAppearanceOverrides)MemberwiseClone();
@@ -40,6 +41,7 @@ namespace DigBlocks.Voxels.Definitions
             if (other == null) return;
             Texture = other.Texture ?? Texture;
             Rotation = other.Rotation ?? Rotation;
+            RandomizeRotation = other.RandomizeRotation ?? RandomizeRotation;
             TintKey = other.TintKey ?? TintKey;
         }
     }
@@ -75,7 +77,11 @@ namespace DigBlocks.Voxels.Definitions
             if (other.Texture.HasValue) { Texture = other.Texture; ClearFaces(face => face.Texture = null); }
             if (other.Rotation.HasValue) { Rotation = other.Rotation; ClearFaces(face => face.Rotation = null); }
             if (other.TintKey != null) { TintKey = other.TintKey; ClearFaces(face => face.TintKey = null); }
-            RandomizeRotation = other.RandomizeRotation ?? RandomizeRotation;
+            if (other.RandomizeRotation.HasValue)
+            {
+                RandomizeRotation = other.RandomizeRotation;
+                ClearFaces(face => face.RandomizeRotation = null);
+            }
             for (int i = 0; i < FaceCount; i++)
             {
                 if (other.Faces[i] == null) continue;
@@ -94,14 +100,16 @@ namespace DigBlocks.Voxels.Definitions
     public readonly struct BlockFaceAppearance
     {
         public readonly ushort Texture;
-        public readonly byte Rotation;
+        private readonly byte rotationAndPolicy;
+        public byte Rotation => (byte)(rotationAndPolicy & 3);
+        public bool RandomizeRotation => (rotationAndPolicy & 4) != 0;
         //index into the compiled tint-source table; zero means untinted.
         public readonly byte Tint;
 
-        public BlockFaceAppearance(ushort texture, byte rotation, byte tint)
+        public BlockFaceAppearance(ushort texture, byte rotation, byte tint, bool randomizeRotation = false)
         {
             if (rotation > 3) throw new ArgumentOutOfRangeException(nameof(rotation));
-            Texture = texture; Rotation = rotation; Tint = tint;
+            Texture = texture; rotationAndPolicy = (byte)(rotation | (randomizeRotation ? 4 : 0)); Tint = tint;
         }
     }
 

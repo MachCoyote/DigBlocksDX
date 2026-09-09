@@ -1,0 +1,39 @@
+#pragma kernel Upload
+#pragma kernel Cull
+
+struct ChunkData { float3 origin; uint start; uint count; uint active; uint reserved0; uint reserved1; };
+StructuredBuffer<uint3> _Upload;
+RWStructuredBuffer<uint3> _GeometryWrite;
+uint _UploadStart, _UploadCount;
+[numthreads(64, 1, 1)]
+void Upload(uint id : SV_DispatchThreadID)
+{
+    if (id < _UploadCount) _GeometryWrite[_UploadStart + id] = _Upload[id];
+}
+
+StructuredBuffer<uint3> _Geometry;
+StructuredBuffer<ChunkData> _Chunks;
+AppendStructuredBuffer<uint> _Visible;
+float4 _Planes[6];
+float3 _CameraPosition;
+float _RangeSquared;
+uint _ChunkCount, _Material, _ShadowOnly;
+[numthreads(64, 1, 1)]
+void Cull(uint chunk : SV_GroupID, uint lane : SV_GroupIndex)
+{
+    if (chunk >= _ChunkCount) return;
+    ChunkData data = _Chunks[chunk];
+    if (data.active == 0 || data.count == 0) return;
+    float3 center = data.origin + 16;
+    float3 distance = max(abs(center - _CameraPosition) - 16, 0);
+    if (dot(distance, distance) > _RangeSquared) return;
+    if (_ShadowOnly == 0)
+        for (uint p = 0; p < 6; p++)
+            if (dot(_Planes[p].xyz, center) + _Planes[p].w + dot(abs(_Planes[p].xyz), float3(16,16,16)) < 0) return;
+    //shadow batches conservatively retain off-camera chunks; URP culls their batch bounds per cascade.
+    for (uint i = lane; i < data.count; i += 64)
+    {
+        uint index = data.start + i;
+        if ((_Geometry[index].z >> 24) == _Material) _Visible.Append(index);
+    }
+}

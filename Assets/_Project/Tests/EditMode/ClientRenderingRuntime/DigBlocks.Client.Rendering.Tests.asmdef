@@ -1,0 +1,6 @@
+{
+  "name": "DigBlocks.Client.Rendering.Tests",
+  "references": ["DigBlocks.Client.Rendering"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

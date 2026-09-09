@@ -1,6 +1,6 @@
 {
   "key": "digblocks:stone",
   "archetype": "digblocks:rock",
-  "texture": 1,
+  "texture": 4,
   "drops": "digblocks:drop/cobblestone"
 }

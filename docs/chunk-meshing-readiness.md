@@ -1,6 +1,6 @@
 # From chunk data to meshing
 
-Status: September 7, 2026. The pre-meshing chunk-data path is implemented.
+Status: September 8, 2026. The data foundation below remains current; the opaque-cube renderer is now implemented. See [current meshing implementation](chunk-meshing-rendering.md) for the replacement of the proposed next steps below.
 See [streaming contracts and evidence](chunk-streaming-implementation.md) for
 current limits and verification, and [implementation progress](chunk-implementation-progress.md)
 for earlier milestones.

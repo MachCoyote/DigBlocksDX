@@ -3,16 +3,19 @@
   "rootNamespace": "DigBlocks.Bootstrap",
   "references": [
     "DigBlocks.Client",
+    "DigBlocks.Client.Rendering",
     "DigBlocks.Client.UI",
     "DigBlocks.Core",
     "DigBlocks.Server",
     "DigBlocks.Networking",
     "DigBlocks.Networking.NetCode",
     "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Runtime",
     "DigBlocks.Voxels.Content",
     "UniTask",
     "Unity.Entities",
-    "Unity.Collections"
+    "Unity.Collections",
+    "Unity.Mathematics"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

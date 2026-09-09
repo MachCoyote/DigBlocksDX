@@ -97,7 +97,7 @@ Simulation fields, all optional: `opaque`, `fullCube`, `collides`, `replaceable`
 does not attenuate light unless it states an attenuation explicitly.
 
 Appearance fields, all optional: `material`, `texture`, `textures`, `rotation`,
-`rotations`, `tint`, `tints`, `randomizeRotation`. The face maps are keyed by
+`rotations`, `tint`, `tints`, `randomizeRotation`, `randomizeRotations`. The face maps are keyed by
 `down`, `up`, `north`, `south`, `west`, `east`, plus the shorthands `end` (up and
 down) and `side` (the four horizontals). Groups apply before individual faces, so
 a specific face always wins over the group that also covers it.
@@ -114,9 +114,9 @@ Six blocks are defined, plus the fluid channel's reserved empty value.
 | --- | ---: | --- | --- |
 | `digblocks:air` | 0 | — | none; invisible |
 | `digblocks:bedrock` | 1 | `digblocks:rock` | 5 on every face |
-| `digblocks:dirt` | 2 | `digblocks:soil` | 2 on every face |
-| `digblocks:grass_block` | 3 | `digblocks:soil` | 3 up, 4 on the four sides, 2 down |
-| `digblocks:stone` | 4 | `digblocks:rock` | 1 on every face |
+| `digblocks:dirt` | 2 | `digblocks:soil` | 3 on every face |
+| `digblocks:grass_block` | 3 | `digblocks:soil` | 1 up, 2 on the four sides, 3 down |
+| `digblocks:stone` | 4 | `digblocks:rock` | 4 on every face |
 | `digblocks:testblock` | 5 | `digblocks:solid` | 0 on every face |
 | `digblocks:empty` | 0 (fluid) | — | none; invisible |
 
@@ -161,3 +161,5 @@ alignment to state ids, and rejection of unknown archetypes, cycles, out-of-rang
 slices, malformed JSON and unknown fields. `ShippedBlockContentTests` asserts the
 compiled ids, attributes and slice assignments of the content above, so a content
 edit has to update those assertions deliberately.
+
+Per-face `randomizeRotations` accepts boolean values with the same face/group keys. Explicit face values override groups and inherited block defaults. Grass uses `end: true, side: false`. A later block-wide policy clears inherited per-face policies. The resolved random quarter turn is added to fixed rotation modulo four using world position, face and visual seed. Face records remain four bytes.

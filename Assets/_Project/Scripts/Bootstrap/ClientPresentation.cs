@@ -38,6 +38,7 @@ namespace DigBlocks.Bootstrap
         public MenuRegistry Registry { get; }
 
         public ApplicationFlowController Flow { get; }
+        public bool GameplayInputAvailable => input.IsGameplayInputAvailable;
 
         public void Dispose()
         {
