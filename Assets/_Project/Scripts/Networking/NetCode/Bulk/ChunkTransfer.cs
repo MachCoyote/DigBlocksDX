@@ -208,10 +208,11 @@ namespace DigBlocks.Networking.NetCode
     //connection-local staging only; the caller validates live subscriptions and applies decoded data before ACK.
     public sealed class ChunkTransferReassembler
     {
-        private const int TransferLimit = 2;
+        private const int TransferLimit = 64;
         private const int ByteLimit = TransferLimit * ChunkWireCodec.MaxDeltaBytes;
         private readonly int maxTransfers, maxTotalBytes;
         private readonly Dictionary<ulong, Pending> pending = new();
+        private readonly List<ulong> matched = new();
 
         private sealed class Pending
         {
@@ -284,12 +285,12 @@ namespace DigBlocks.Networking.NetCode
 
         public void Cancel(ChunkAddress address, ulong subscriptionGeneration)
         {
-            //at most two matches; collect identities before modifying the dictionary.
-            ulong first = 0, second = 0;
+            //collect identities before modifying the dictionary; a window can hold several matches.
+            matched.Clear();
             foreach (var pair in pending)
                 if (pair.Value.Start.Address.Equals(address) && pair.Value.Start.SubscriptionGeneration == subscriptionGeneration)
-                { if (first == 0) first = pair.Key; else second = pair.Key; }
-            Cancel(first); Cancel(second);
+                    matched.Add(pair.Key);
+            foreach (ulong id in matched) Cancel(id);
         }
 
         public void Clear() { pending.Clear(); BufferedBytes = 0; }

@@ -181,7 +181,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.Throws<ArgumentException>(() => ChunkTransferFrames.EncodeEviction(Address, 0));
             Assert.Throws<ArgumentException>(() => ChunkTransferFrames.EncodeSlice(1, int.MaxValue, new byte[] { 1 }, 0, 1));
             Assert.Throws<ArgumentException>(() => ChunkTransferFrames.EncodeSlice(1, 0, new byte[] { 1 }, int.MaxValue, 1));
-            Assert.Throws<ArgumentException>(() => ChunkTransferFrames.EncodeSlice(1, 0, new byte[1005], 0, 1005));
+            Assert.Throws<ArgumentException>(() => ChunkTransferFrames.EncodeSlice(1, 0, new byte[ChunkTransferFrames.MaxSliceBytes + 1], 0, ChunkTransferFrames.MaxSliceBytes + 1));
             var packet = ChunkTransferFrames.EncodeSlice(1, 5, new byte[] { 0, 4, 8, 0 }, 1, 2);
             ChunkTransferFrames.DecodeSlice(packet, out _, out _, out var slice);
             Assert.That(slice, Is.EqualTo(new byte[] { 4, 8 }));
@@ -205,7 +205,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         public void InvalidStartsAndSlicesCannotAllocateOrReleaseUnrelatedTransfers()
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkTransferReassembler(0));
-            Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkTransferReassembler(3));
+            Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkTransferReassembler(int.MaxValue));
             Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkTransferReassembler(2, -1));
             var assembler = new ChunkTransferReassembler();
             Assert.Throws<FormatException>(() => assembler.Begin(Start(0)));

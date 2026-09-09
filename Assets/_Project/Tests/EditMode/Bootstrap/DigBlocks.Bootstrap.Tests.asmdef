@@ -3,6 +3,7 @@
   "rootNamespace": "DigBlocks.Bootstrap.Tests",
   "references": [
     "DigBlocks.Bootstrap",
+    "DigBlocks.ChunkProtocol",
     "DigBlocks.Client",
     "DigBlocks.Client.UI",
     "DigBlocks.Core",

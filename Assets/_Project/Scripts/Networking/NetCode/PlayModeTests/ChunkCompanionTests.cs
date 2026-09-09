@@ -107,7 +107,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         {
             var runtime = new ServerRuntime(NetCodeWorldFactory.CreateServerWorld);
             var session = new NetCodeSession(NetworkSessionRole.Server, new NetworkSessionOptions("127.0.0.1", 0, 1, bindAddress: "127.0.0.1"), null, () => runtime.World, logger);
-            var bulk = new ChunkCompanionService(session, 0, streamingOptions: new ChunkStreamingOptions(0, 0, 1024, 1024));
+            var bulk = new ChunkCompanionService(session, 0, streamingOptions: new ChunkStreamingOptions(0, 0, 1400, 1400));
             await Host(runtime, session, bulk).StartAsync(CancellationToken.None);
             var source = session.ServerWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             var address = new ChunkAddress(1, default);

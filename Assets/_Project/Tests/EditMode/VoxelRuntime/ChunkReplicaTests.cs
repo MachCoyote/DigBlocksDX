@@ -87,6 +87,40 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(store.DataReady, Is.False);
         }
 
+        //A neighbour only re-meshes when the plane facing it changes, so publication reports exactly
+        //which boundary planes moved. An interior edit must report none.
+        [Test]
+        public void PublicationReportsOnlyTheBoundaryPlanesThatChanged()
+        {
+            using var world = new World("Replica face masks");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            store.EnableReplicas();
+            var address = new ChunkAddress(1, default);
+            Assert.That(store.SetReplicaInterest(new ChunkInterest(1, address, 0, 0)), Is.True);
+            byte reported = 0xFF;
+            store.ReplicaChanged += (_, faces) => reported = faces;
+
+            //an all-air chunk matches the air padding an absent neighbour already assumed.
+            Assert.That(store.PublishReplica(1, Image(address, 1)), Is.True);
+            Assert.That(reported, Is.Zero, "An empty chunk cannot change any neighbour.");
+
+            //an interior cell is not on any boundary plane.
+            var solids = new uint[ChunkLayout.Volume];
+            solids[ChunkLayout.Index(new int3(5, 5, 5))] = 1;
+            Assert.That(store.PublishReplica(1, new ChunkImage(address, 1, 2, solids, new uint[ChunkLayout.Volume])), Is.True);
+            Assert.That(reported, Is.Zero, "An interior edit cannot change any neighbour.");
+
+            //y = 0 is the plane the chunk below reads, which is face Down.
+            solids[ChunkLayout.Index(new int3(5, 0, 5))] = 1;
+            Assert.That(store.PublishReplica(1, new ChunkImage(address, 1, 3, solids, new uint[ChunkLayout.Volume])), Is.True);
+            Assert.That(reported, Is.EqualTo((byte)(1 << (int)Definitions.BlockFace.Down)));
+
+            //x = 31 is the plane the chunk to the east reads.
+            solids[ChunkLayout.Index(new int3(ChunkLayout.Edge - 1, 7, 7))] = 1;
+            Assert.That(store.PublishReplica(1, new ChunkImage(address, 1, 4, solids, new uint[ChunkLayout.Volume])), Is.True);
+            Assert.That(reported, Is.EqualTo((byte)(1 << (int)Definitions.BlockFace.East)));
+        }
+
         private static ChunkImage Image(ChunkAddress address, ulong revision) =>
             new ChunkImage(address, 1, revision, new uint[ChunkLayout.Volume], new uint[ChunkLayout.Volume]);
     }

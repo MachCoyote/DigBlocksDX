@@ -85,7 +85,7 @@ namespace DigBlocks.Networking.NetCode
                     var world = session.ServerWorld;
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Server world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
-                    owner.Configure(registry); serverStore = owner;
+                    owner.Configure(registry, maxSnapshots: streamingOptions.SnapshotWorkers); serverStore = owner;
                     ushort port = 0;
                     if (!ipc)
                     {
@@ -104,7 +104,7 @@ namespace DigBlocks.Networking.NetCode
                     var world = session.ClientWorld;
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Client world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
-                    owner.Configure(registry).EnableReplicas(); clientStore = owner;
+                    owner.Configure(registry, maxSnapshots: streamingOptions.SnapshotWorkers).EnableReplicas(); clientStore = owner;
                     clientSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (clientSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
                     clientEndpoint = new BulkCompanionEndpoint(world, false, ipc, 0, registry, bindingTimeout, maxPending, streamingOptions);

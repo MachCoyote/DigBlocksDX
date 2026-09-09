@@ -92,7 +92,8 @@ namespace DigBlocks.Client.Rendering
                     store.ReplicaChanged += OnChanged; store.ReplicasReset += OnReset;
                     store.ReplicaRemoved += OnRemoved;
                     store.GetReplicaStamps(initial);
-                    foreach (var stamp in initial) OnChanged(stamp.Address);
+                    //adopting a populated store says nothing about what changed, so rebuild every face.
+                    foreach (var stamp in initial) OnChanged(stamp.Address, AllFaces);
                 }
             }
             foreach (var worker in workers)
@@ -170,7 +171,9 @@ namespace DigBlocks.Client.Rendering
             return true;
         }
 
-        private void OnChanged(ChunkAddress address)
+        private const byte AllFaces = 0x3F;
+
+        private void OnChanged(ChunkAddress address, byte changedFaces)
         {
             renderer.SetGraphReady(false);
             if (!entries.TryGetValue(address, out var entry))
@@ -179,12 +182,18 @@ namespace DigBlocks.Client.Rendering
                 entry = new Entry { Address = address, Slot = freeSlots.Pop(), Enqueued = tick };
                 entries.Add(address, entry);
             }
-            for (int i = 0; i < 7; i++)
-                if (entries.TryGetValue(Neighbor(address, i), out var dirty))
-                {
-                    if (dirty.Built == dirty.Dirty) dirty.Enqueued = tick;
-                    dirty.Dirty++;
-                }
+            Dirty(entry);
+            //a neighbour's geometry depends only on the plane facing it, so an unchanged plane needs no rebuild.
+            //During a radial load this keeps each chunk from being remeshed once per arriving neighbour.
+            for (int i = 1; i < 7; i++)
+                if ((changedFaces & (1 << (i - 1))) != 0 && entries.TryGetValue(Neighbor(address, i), out var dirty))
+                    Dirty(dirty);
+        }
+
+        private void Dirty(Entry entry)
+        {
+            if (entry.Built == entry.Dirty) entry.Enqueued = tick;
+            entry.Dirty++;
         }
         private void OnReset()
         {
@@ -198,12 +207,9 @@ namespace DigBlocks.Client.Rendering
             renderer.Remove(removed.Slot);
             freeSlots.Push(removed.Slot);
             if (removed.Built != 0) BuiltCount--;
+            //the departed chunk's planes are gone with it, so every neighbour re-pads that side as air.
             for (int i = 1; i < 7; i++)
-                if (entries.TryGetValue(Neighbor(address, i), out var dirty))
-                {
-                    if (dirty.Built == dirty.Dirty) dirty.Enqueued = tick;
-                    dirty.Dirty++;
-                }
+                if (entries.TryGetValue(Neighbor(address, i), out var dirty)) Dirty(dirty);
         }
         private void ResetSlots() { freeSlots.Clear(); for (int i = settings.MaxChunks - 1; i >= 0; i--) freeSlots.Push((uint)i); }
         private static ChunkAddress Neighbor(ChunkAddress address, int index)

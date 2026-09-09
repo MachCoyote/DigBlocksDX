@@ -8,6 +8,7 @@ using DigBlocks.Bootstrap.Diagnostics;
 using DigBlocks.Client.Flow;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Session;
+using DigBlocks.Networking.NetCode;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -66,7 +67,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             if (SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
             {
                 Assert.That(owner.Terrain, Is.Not.Null);
-                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(75));
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(AuthoredInterestChunks()));
                 Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
             }
 
@@ -89,7 +90,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             {
                 owner.RequestPlay();
                 yield return WaitForApplicationState(owner, ApplicationState.Playing, 30);
-                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(75));
+                Assert.That(owner.Terrain.BuiltChunks, Is.EqualTo(AuthoredInterestChunks()));
                 Assert.That(owner.Terrain.Quads, Is.GreaterThan(0));
                 for (int frame = 0; frame < 4; frame++) yield return null;
                 Assert.That(owner.Terrain.Quads, Is.GreaterThan(0), "All chunks in the initial moving interest must be meshed before Playing.");
@@ -231,5 +232,15 @@ namespace DigBlocks.Bootstrap.PlayModeTests
                 Messages.Add(message);
             }
         }
+        //the authored render distances are tuning, so derive the expected neighbourhood instead of
+        //pinning a number that changes whenever someone edits the settings asset.
+        private static int AuthoredInterestChunks()
+        {
+            var settings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
+            var options = settings != null ? settings.CreateOptions() : new ChunkStreamingOptions();
+            int width = 2 * options.HorizontalRadius + 1;
+            return width * width * (2 * options.VerticalRadius + 1);
+        }
+
     }
 }

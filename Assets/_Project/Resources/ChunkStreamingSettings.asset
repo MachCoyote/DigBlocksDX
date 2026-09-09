@@ -13,5 +13,5 @@ MonoBehaviour:
   m_Name: ChunkStreamingSettings
   m_EditorClassIdentifier: DigBlocks.Networking.NetCode::DigBlocks.Networking.NetCode.ChunkStreamingSettings
   WorldId: 1
-  HorizontalRenderDistanceChunks: 4
-  VerticalRenderDistanceChunks: 4
+  HorizontalRenderDistanceChunks: 3
+  VerticalRenderDistanceChunks: 2

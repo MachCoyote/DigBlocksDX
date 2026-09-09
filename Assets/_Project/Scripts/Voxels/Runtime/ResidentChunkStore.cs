@@ -5,6 +5,7 @@ using DigBlocks.ChunkProtocol;
 using Unity.Entities;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 
 namespace DigBlocks.Voxels.Runtime
 {
@@ -55,6 +56,7 @@ namespace DigBlocks.Voxels.Runtime
         {
             public ChunkData Data; public Entity Entity; public int Leases, HistoryCellCount;
             public bool Loaded;
+            public ulong[] FaceHashes;
             public readonly Queue<ChunkDelta> History = new();
         }
         private sealed class Pending
@@ -72,13 +74,15 @@ namespace DigBlocks.Voxels.Runtime
         {
             if (registry == null) throw new ArgumentNullException(nameof(registry));
             if (maxResidents < 1 || maxResidents > 65536) throw new ArgumentOutOfRangeException(nameof(maxResidents));
-            if (maxSnapshots < 1 || maxSnapshots > 8) throw new ArgumentOutOfRangeException(nameof(maxSnapshots));
+            if (maxSnapshots < 1 || maxSnapshots > 64) throw new ArgumentOutOfRangeException(nameof(maxSnapshots));
             this.manager = manager; this.registry = registry; this.maxResidents = maxResidents; this.maxSnapshots = maxSnapshots;
             ownerThread = Thread.CurrentThread.ManagedThreadId;
         }
         public int Count => chunks.Count;
         public bool IsDisposed => disposed;
-        public event Action<ChunkAddress> ReplicaChanged;
+        //the second argument is a bitmask of BlockFace bits whose boundary plane changed. A neighbour's
+        //mesh depends only on the plane facing it, so a clear bit means that neighbour needs no rebuild.
+        public event Action<ChunkAddress, byte> ReplicaChanged;
         public event Action<ChunkAddress> ReplicaRemoved;
         public event Action ReplicasReset;
 
@@ -288,6 +292,16 @@ namespace DigBlocks.Voxels.Runtime
                         throw new ArgumentException("Conflicting replica at the published revision.");
                 return true;
             }
+            //an absent neighbour is padded as air, so a first arrival compares against the empty plane
+            //instead of counting as a change on every face.
+            var faces = new ulong[6];
+            byte changed = 0;
+            ComputeFaceHashes(image, faces);
+            for (int face = 0; face < 6; face++)
+            {
+                ulong before = previous?.FaceHashes == null ? EmptyFaceHash : previous.FaceHashes[face];
+                if (before != faces[face]) changed |= (byte)(1 << face);
+            }
             //build detached replacement first; failed validation/import leaves the published entity intact.
             var data = ChunkData.FromChannels(image.Address, image.Incarnation, image.Revision, image.CopySolids(), image.CopyFluids());
             Entity entity = previous?.Entity ?? Entity.Null;
@@ -295,7 +309,7 @@ namespace DigBlocks.Voxels.Runtime
             {
                 if (entity == Entity.Null) entity = manager.CreateEntity(typeof(ResidentChunk));
                 manager.SetComponentData(entity, new ResidentChunk { Address = image.Address, Incarnation = image.Incarnation, Revision = image.Revision });
-                chunks[image.Address] = new Entry { Data = data, Entity = entity };
+                chunks[image.Address] = new Entry { Data = data, Entity = entity, FaceHashes = faces };
             }
             catch
             {
@@ -304,8 +318,43 @@ namespace DigBlocks.Voxels.Runtime
                 throw;
             }
             previous?.Data.Dispose();
-            ReplicaChanged?.Invoke(image.Address);
+            ReplicaChanged?.Invoke(image.Address, changed);
             return true;
+        }
+
+        //solid values on one boundary plane, in the order ChunkMeshScheduler pads its neighbours.
+        //Fluids are not meshed, so they cannot change a neighbour and are deliberately excluded.
+        private static readonly ulong EmptyFaceHash = EmptyPlaneHash();
+
+        private static ulong EmptyPlaneHash()
+        {
+            ulong hash = 14695981039346656037;
+            for (int i = 0; i < ChunkLayout.Edge * ChunkLayout.Edge; i++) hash = (hash ^ 0u) * 1099511628211;
+            return hash;
+        }
+
+        private static void ComputeFaceHashes(ChunkImage image, ulong[] destination)
+        {
+            for (int face = 0; face < 6; face++)
+            {
+                ulong hash = 14695981039346656037;
+                for (int a = 0; a < ChunkLayout.Edge; a++)
+                for (int b = 0; b < ChunkLayout.Edge; b++)
+                {
+                    int x, y, z;
+                    switch (face)
+                    {
+                        case 0: x = a; y = 0; z = b; break;
+                        case 1: x = a; y = ChunkLayout.Edge - 1; z = b; break;
+                        case 2: x = a; y = b; z = ChunkLayout.Edge - 1; break;
+                        case 3: x = a; y = b; z = 0; break;
+                        case 4: x = 0; y = b; z = a; break;
+                        default: x = ChunkLayout.Edge - 1; y = b; z = a; break;
+                    }
+                    hash = (hash ^ image.SolidAt(ChunkLayout.Index(new int3(x, y, z)))) * 1099511628211;
+                }
+                destination[face] = hash;
+            }
         }
 
         public bool TryCaptureReplica(ChunkAddress address, out ChunkCapture capture)
@@ -455,7 +504,7 @@ namespace DigBlocks.Voxels.Runtime
     public partial class ChunkWorldSystem : SystemBase
     {
         public ResidentChunkStore Store { get; private set; }
-        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256, int maxSnapshots = 2)
+        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256, int maxSnapshots = 16)
         {
             if (Store != null) throw new InvalidOperationException("World already has a chunk store.");
             return Store = new ResidentChunkStore(EntityManager, registry, maxResidents, maxSnapshots);

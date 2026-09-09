@@ -56,9 +56,11 @@ old and new neighborhoods:
 - A server chunk remains resident while any peer leases it. Releasing the final lease
   removes its current data and entities from the resident store.
 
-The transfer protocol and existing byte/payload budgets are unchanged. The current
-scheduler selects at most one new chunk transfer per peer per tick and allows one active
-transfer per peer, preserving bounded work while the interest queue converges.
+Superseded on September 9, 2026: the scheduler described here carried one active transfer
+per peer and would not request the next chunk until the current one was acknowledged. That
+serialisation dominated load time and was replaced by a bounded in-flight window. See
+[chunk-streaming-throughput.md](chunk-streaming-throughput.md). Selection is still
+closest-first; arrival order is now radial only to within the window depth.
 
 ## Authoritative content and persistence seam
 

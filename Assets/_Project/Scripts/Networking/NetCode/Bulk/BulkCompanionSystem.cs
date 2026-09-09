@@ -105,7 +105,9 @@ namespace DigBlocks.Networking.NetCode
                 Port = driver.LocalPort; State = ChunkConnectionState.Listening;
                 streamingServer = new ChunkStreamingServer(store, streamingOptions,
                     (id, packet) => peers.TryGetValue(id, out var peer) && Live(Context, id, peer) && driver.TrySend(peer.Connection, packet),
-                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed), source);
+                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed), source,
+                    //slice to what this connection's pipeline actually accepts; the path MTU decides it.
+                    id => peers.TryGetValue(id, out var peer) && peer.Connection.IsCreated ? driver.PayloadCapacity(peer.Connection) : 0);
             }
             else { State = ChunkConnectionState.AwaitingOffer; clientDeadline = Now + timeout; }
         }

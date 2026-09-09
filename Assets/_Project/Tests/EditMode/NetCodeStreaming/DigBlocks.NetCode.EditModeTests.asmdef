@@ -1,0 +1,20 @@
+{
+  "name": "DigBlocks.NetCode.EditModeTests",
+  "rootNamespace": "DigBlocks.Networking.NetCode.Tests",
+  "references": [
+    "DigBlocks.ChunkProtocol",
+    "DigBlocks.Core",
+    "DigBlocks.Networking",
+    "DigBlocks.Networking.NetCode",
+    "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Runtime",
+    "Unity.Collections",
+    "Unity.Entities",
+    "Unity.Mathematics",
+    "Unity.NetCode",
+    "Unity.Networking.Transport"
+  ],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": false,
+  "optionalUnityReferences": ["TestAssemblies"]
+}

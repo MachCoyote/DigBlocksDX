@@ -135,7 +135,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 yield return null;
             }
             Assert.That(server.AppliedAcknowledgements, Is.EqualTo(9));
-            AssertRadial(starts, Address);
+            AssertRadial(starts, Address, options.PeerWindow);
             var retainedAddress = new ChunkAddress(1, new int3(0, 0, 0));
             Assert.That(replica.TryGetReplicaStamp(retainedAddress, out var retained), Is.True);
 
@@ -161,20 +161,28 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(after.Incarnation, Is.EqualTo(retained.Incarnation));
             Assert.That(replica.TryGetReplicaStamp(new ChunkAddress(1, new int3(-1, 0, 0)), out _), Is.False);
             Assert.That(starts.Count, Is.EqualTo(3));
-            AssertRadial(starts, new ChunkAddress(1, new int3(1, 0, 0)));
+            AssertRadial(starts, new ChunkAddress(1, new int3(1, 0, 0)), options.PeerWindow);
         }
 
-        private static void AssertRadial(IReadOnlyList<ChunkAddress> addresses, ChunkAddress anchor)
+        //Selection is still strictly closest-first, but transfers are pipelined, so the window's chunks are
+        //declared as their payloads finish encoding. Order is therefore radial to within the in-flight window:
+        //no chunk may be declared nearer than one declared a whole window earlier.
+        private static void AssertRadial(IReadOnlyList<ChunkAddress> addresses, ChunkAddress anchor, int window)
         {
-            long previous = -1;
+            var distances = new List<long>(addresses.Count);
             foreach (var address in addresses)
             {
                 long x = (long)address.Position.x - anchor.Position.x;
                 long y = (long)address.Position.y - anchor.Position.y;
                 long z = (long)address.Position.z - anchor.Position.z;
-                long distance = x * x + y * y + z * z;
-                Assert.That(distance, Is.GreaterThanOrEqualTo(previous));
-                previous = distance;
+                distances.Add(x * x + y * y + z * z);
+            }
+            for (int i = 0; i < distances.Count; i++)
+            {
+                long settled = -1;
+                for (int j = 0; j <= i - window; j++) settled = Math.Max(settled, distances[j]);
+                Assert.That(distances[i], Is.GreaterThanOrEqualTo(settled),
+                    $"Chunk {addresses[i]} was declared out of radial order by more than the {window}-transfer window.");
             }
         }
 
@@ -228,7 +236,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry);
             var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry); replica.EnableReplicas();
             var inbound = new Queue<byte[]>(); var replies = new Queue<byte[]>(); var failed = new List<ulong>();
-            var options = new ChunkStreamingOptions(0, 0, 2048, 1024, 2, 1);
+            var options = new ChunkStreamingOptions(0, 0, 2800, 1400, 2, 1);
             using var server = new ChunkStreamingServer(store, options, (peer, packet) =>
             { if (peer == 1) return false; inbound.Enqueue(packet); return true; }, peer => failed.Add(peer));
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail("Healthy client failed"), 0);

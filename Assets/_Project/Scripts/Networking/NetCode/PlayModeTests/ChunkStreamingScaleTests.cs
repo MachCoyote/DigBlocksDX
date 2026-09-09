@@ -89,7 +89,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                     for (int i = 0; i < ChunkLayout.Volume; i++)
                     { Assert.That(image.SolidAt(i), Is.EqualTo(lease.SolidAt(i))); Assert.That(image.FluidAt(i), Is.EqualTo(lease.FluidAt(i))); }
                 }
-                Assert.That(observedPayloads, Is.LessThanOrEqualTo(options.MaxPayloads)); Assert.That(observedCaptures, Is.LessThanOrEqualTo(2));
+                Assert.That(observedPayloads, Is.LessThanOrEqualTo(options.MaxPayloads)); Assert.That(observedCaptures, Is.LessThanOrEqualTo(options.SnapshotWorkers));
                 Assert.That(source.Count, Is.EqualTo(1));
                 TestContext.WriteLine(FormattableString.Invariant($"STREAMING_METRICS peers={peerCount} impaired={impaired} bytes={server.SentChunkBytes - beforeBytes} first_apply_s={fastest:F3} last_apply_s={slowest:F3} max_ack_s={server.MaxAppliedAckSeconds:F3} peak_encoded_bytes={server.PeakEncodedPayloadBytes} payload_slots={observedPayloads} capture_slots={observedCaptures} process_managed_peak={managedPeak} unity_allocated_peak={unityPeak}"));
             }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DigBlocks.ChunkProtocol;
 using DigBlocks.Voxels;
 using DigBlocks.Voxels.Runtime;
@@ -12,11 +13,15 @@ namespace DigBlocks.Networking.NetCode
         private readonly ChunkStreamingOptions options;
         private readonly Func<byte[], bool> send;
         private readonly Action fail;
-        private readonly ChunkTransferReassembler assembler = new(1);
+        private readonly ChunkTransferReassembler assembler;
+        //several chunks are in flight at once, so declarations are tracked per transfer rather than singly.
+        private readonly Dictionary<ulong, TransferStart> active = new();
+        private readonly Queue<byte[]> responses = new();
         private ChunkInterest interest;
-        private TransferStart active;
-        private ulong highestTransfer;
-        private byte[] response;
+        //transfers complete out of order, so staleness is a settled set rather than a high-water mark:
+        //everything at or below the floor is settled, and the set holds the gaps above it.
+        private readonly HashSet<ulong> retired = new();
+        private ulong retiredFloor, highestSeen;
         private byte[] interestRequest;
         private double deadline;
         private int retries;
@@ -26,6 +31,7 @@ namespace DigBlocks.Networking.NetCode
         {
             this.store = store; maxSolid = registry.MaxSolidStateId; maxFluid = registry.MaxFluidStateId; this.options = options;
             this.send = send; this.fail = fail; deadline = now + options.ProgressTimeout;
+            assembler = new ChunkTransferReassembler(options.PeerWindow, options.PeerWindow * ChunkWireCodec.MaxDeltaBytes);
         }
 
         public bool RequestInterest(ChunkAddress anchor)
@@ -50,7 +56,9 @@ namespace DigBlocks.Networking.NetCode
                     return;
                 }
                 if (!store.SetReplicaInterest(next)) throw new FormatException("Rejected live interest.");
-                interest = next; assembler.Clear(); active = default; response = null; retries = 0;
+                interest = next; assembler.Clear(); active.Clear(); responses.Clear(); retries = 0;
+                //every transfer declared under the old epoch is dead, so settle the whole range at once.
+                retired.Clear(); retiredFloor = Math.Max(retiredFloor, highestSeen);
                 deadline = now + options.ProgressTimeout;
                 return;
             }
@@ -58,25 +66,26 @@ namespace DigBlocks.Networking.NetCode
             {
                 var start = ChunkTransferFrames.DecodeStart(packet);
                 if (interest == null) throw new FormatException("Transfer precedes interest.");
-                if (start.TransferId == active.TransferId)
-                { assembler.Begin(start); return; }
-                if (start.TransferId <= highestTransfer) return;
-                if (start.SubscriptionGeneration < interest.Epoch) { highestTransfer = start.TransferId; return; }
+                //a repeated declaration for a live transfer is benign; the reassembler validates it matches.
+                if (active.ContainsKey(start.TransferId)) { assembler.Begin(start); return; }
+                if (Settled(start.TransferId)) return;
+                highestSeen = Math.Max(highestSeen, start.TransferId);
+                if (start.SubscriptionGeneration < interest.Epoch) { Retire(start.TransferId); return; }
                 if (start.SubscriptionGeneration != interest.Epoch || !interest.Contains(start.Address)) throw new FormatException("Transfer outside live interest.");
-                highestTransfer = start.TransferId; assembler.Clear();
                 if (!assembler.Begin(start)) throw new FormatException("Reassembly budget exceeded.");
-                active = start; deadline = now + options.ProgressTimeout;
+                active.Add(start.TransferId, start); deadline = now + options.ProgressTimeout;
                 return;
             }
             if (kind != ChunkFrameKind.Slice) throw new FormatException("Unexpected server chunk frame.");
             ChunkTransferFrames.DecodeSlice(packet, out ulong id, out int offset, out var bytes);
-            if (id != active.TransferId)
+            if (!active.ContainsKey(id))
             {
-                if (id > highestTransfer) throw new FormatException("Slice precedes declaration.");
+                if (!Settled(id)) throw new FormatException("Slice precedes declaration.");
                 return;
             }
             deadline = now + options.ProgressTimeout;
             if (!assembler.AddSlice(id, offset, bytes, out var declaration, out var payload)) return;
+            active.Remove(id);
             ChunkImage image;
             if (declaration.IsDelta)
             {
@@ -94,31 +103,59 @@ namespace DigBlocks.Networking.NetCode
                     throw new FormatException("Snapshot differs from declaration.");
             }
             if (!store.PublishReplica(declaration.SubscriptionGeneration, image)) { RequestResync(id, now); return; }
-            response = ChunkTransferFrames.EncodeAcknowledgement(id, image.Revision);
-            active = default; retries = 0;
+            responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, image.Revision));
+            Retire(id); retries = 0;
         }
 
         private void RequestResync(ulong id, double now)
         {
-            assembler.Clear(); active = default;
+            //the server restarts a resynced chunk under a fresh identity, so this one is finished either way.
+            assembler.Cancel(id); active.Remove(id); Retire(id);
             if (++retries > 2) { fail(); return; }
-            response = ChunkTransferFrames.EncodeResync(id); deadline = now + options.ProgressTimeout;
+            responses.Enqueue(ChunkTransferFrames.EncodeResync(id)); deadline = now + options.ProgressTimeout;
+        }
+
+        private bool Settled(ulong id) => id <= retiredFloor || retired.Contains(id);
+
+        private void Retire(ulong id)
+        {
+            if (id <= retiredFloor) return;
+            retired.Add(id);
+            while (retired.Remove(retiredFloor + 1)) retiredFloor++;
+            if (retired.Count <= 4 * options.PeerWindow) return;
+            //abandoned transfers leave permanent gaps. Collapse them, but never past a live transfer.
+            ulong lowestActive = ulong.MaxValue;
+            foreach (ulong live in active.Keys) lowestActive = Math.Min(lowestActive, live);
+            ulong floor = retiredFloor;
+            foreach (ulong settled in retired) if (settled < lowestActive) floor = Math.Max(floor, settled);
+            retiredFloor = floor;
+            retired.RemoveWhere(settled => settled <= retiredFloor);
         }
 
         public void Tick(double now)
         {
             if (disposed) return;
-            if (response != null && send(response)) { response = null; deadline = now + options.ProgressTimeout; }
-            if (response == null && interestRequest != null && send(interestRequest))
+            //acknowledgements gate nothing on the server now, but they still confirm delta baselines,
+            //so drain as many as the transport will take rather than one per tick.
+            while (responses.Count > 0 && send(responses.Peek()))
+            { responses.Dequeue(); deadline = now + options.ProgressTimeout; }
+            if (responses.Count == 0 && interestRequest != null && send(interestRequest))
             { interestRequest = null; deadline = now + options.ProgressTimeout; }
             if (now < deadline) return;
-            if (active.TransferId != 0) RequestResync(active.TransferId, now);
-            else if (response != null || interest == null || !store.DataReady) fail();
+            if (active.Count != 0)
+            {
+                //oldest declaration first; resyncing one is enough to restart progress.
+                ulong oldest = ulong.MaxValue;
+                foreach (ulong id in active.Keys) oldest = Math.Min(oldest, id);
+                RequestResync(oldest, now);
+            }
+            else if (responses.Count != 0 || interest == null || !store.DataReady) fail();
         }
+
         public void Dispose()
         {
             if (disposed) return;
-            assembler.Clear(); response = null; interestRequest = null; store.ClearReplicas(); disposed = true;
+            assembler.Clear(); active.Clear(); responses.Clear(); retired.Clear(); interestRequest = null; store.ClearReplicas(); disposed = true;
         }
     }
 }

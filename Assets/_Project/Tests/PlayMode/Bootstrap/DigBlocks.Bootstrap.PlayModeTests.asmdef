@@ -15,7 +15,8 @@
     "Unity.Collections",
     "Unity.NetCode",
     "UniTask",
-    "DigBlocks.Networking"
+    "DigBlocks.Networking",
+    "DigBlocks.Networking.NetCode"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

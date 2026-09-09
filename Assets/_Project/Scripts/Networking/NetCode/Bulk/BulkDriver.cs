@@ -21,9 +21,14 @@ namespace DigBlocks.Networking.NetCode
 
     public sealed class BulkDriver : IDisposable
     {
-        public const int MaxPayloadBytes = 1024;
-        private const int MaxQueuedMessages = 256;
-        private const int MaxMessagesPerConnection = 64;
+        //protocol ceiling for one bulk message. Senders slice to the connection's negotiated capacity,
+        //which is path-MTU dependent and always lower; this only bounds validation and receive buffers.
+        public const int MaxPayloadBytes = 1200;
+        private const int MaxQueuedMessages = 1024;
+        //one peer's queue depth. Comfortably above a tick's enqueue burst, so a full queue means the
+        //remote is not draining rather than that the sender simply got ahead within one tick.
+        public const int MaxMessagesPerConnection = 128;
+        private const int MaxMessagesPerConnectionPerUpdate = 64;
         private const int MaxQueuedEvents = 256;
         private readonly int maxConnections;
         private readonly bool server;
@@ -88,6 +93,15 @@ namespace DigBlocks.Networking.NetCode
             if (!connection.IsCreated) throw new InvalidOperationException("Bulk connection could not be created.");
             connections.Add(connection, new PendingConnection());
             return connection;
+        }
+
+        //largest single payload this connection's pipeline accepts, or 0 while it is not ready.
+        //Senders must slice to this rather than to MaxPayloadBytes, which is only the protocol ceiling.
+        public int PayloadCapacity(NetworkConnection connection)
+        {
+            ThrowIfDisposed();
+            if (!connections.TryGetValue(connection, out var pending) || !pending.Ready) return 0;
+            return Math.Min(MaxPayloadBytes, pending.PayloadCapacity);
         }
 
         //acceptance means copied into our bounded queue, not delivered or applied by the remote peer.
@@ -165,7 +179,7 @@ namespace DigBlocks.Networking.NetCode
                 var connection = sendOrder[(start + examined) % sendOrder.Count];
                 var messages = connections[connection].Messages;
                 int perConnection = 0;
-                while (messages.Count > 0 && perConnection < 16 && sent < MaxQueuedMessages)
+                while (messages.Count > 0 && perConnection < MaxMessagesPerConnectionPerUpdate && sent < MaxQueuedMessages)
                 {
                     byte[] bytes = messages.Peek();
                     int result = driver.BeginSend(pipeline, connection, out var writer, bytes.Length);

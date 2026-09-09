@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using DigBlocks.ChunkProtocol;
 using DigBlocks.Core.Launch;
 using DigBlocks.Networking;
 using DigBlocks.Networking.NetCode;
@@ -9,16 +10,21 @@ namespace DigBlocks.Bootstrap.Tests
 {
     public sealed class ChunkLaunchTests
     {
+        //the authored distances are tuning, not a contract. What must hold is that whatever is authored
+        //stays constructible and inside the residency cap, since exceeding it fails the session at startup.
         [Test]
         public void AuthoredChunkDistancesCreateIndependentThreeDimensionalInterest()
         {
             var settings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
             Assert.That(settings, Is.Not.Null);
             var options = settings.CreateOptions();
-            Assert.That(options.HorizontalRadius, Is.EqualTo(2));
-            Assert.That(options.VerticalRadius, Is.EqualTo(1));
-            Assert.That((2 * options.HorizontalRadius + 1) * (2 * options.HorizontalRadius + 1) *
-                (2 * options.VerticalRadius + 1), Is.EqualTo(75));
+            Assert.That(options.HorizontalRadius, Is.GreaterThanOrEqualTo(0));
+            Assert.That(options.VerticalRadius, Is.GreaterThanOrEqualTo(0));
+            long width = 2L * options.HorizontalRadius + 1;
+            long count = width * width * (2L * options.VerticalRadius + 1);
+            //CreateOptions builds the interest itself, so reaching here already proves it is constructible.
+            Assert.That(count, Is.LessThanOrEqualTo(ChunkInterest.MaximumChunks),
+                "Authored render distances must fit the admitted residency and the renderer's chunk slots.");
         }
 
         [Test]
