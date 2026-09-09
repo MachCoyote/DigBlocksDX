@@ -39,9 +39,9 @@ namespace DigBlocks.Bootstrap.PlayModeTests
         }
 
         [UnityTest]
-        public IEnumerator SampleScene_BootstrapReachesTitle()
+        public IEnumerator BootstrapScene_ReachesTitle()
         {
-            SceneManager.LoadScene("SampleScene", LoadSceneMode.Single);
+            SceneManager.LoadScene("Bootstrap", LoadSceneMode.Single);
             yield return null;
 
             DigBlocksBootstrap[] bootstraps = UnityEngine.Object.FindObjectsByType<DigBlocksBootstrap>();

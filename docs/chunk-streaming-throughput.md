@@ -93,9 +93,7 @@ Paths are relative to `Assets/_Project/Scripts`.
 ## Verification
 
 - EditMode: 235 passed, 0 failed.
-- PlayMode: 65 of 66 passed. `DigBlocksBootstrapTests.SampleScene_BootstrapReachesTitle` fails
-  because `SampleScene` is not in the build profile — a pre-existing project configuration issue
-  unrelated to streaming.
+- PlayMode: 66 passed, 0 failed.
 - `DigBlocksBootstrapTests` reaches `Playing` and meshes the full authored neighbourhood twice
   through the real bootstrap path.
 - `ChunkStreamingThroughputTests` is the standing regression guard against returning to
@@ -111,4 +109,4 @@ Paths are relative to `Assets/_Project/Scripts`.
   distances grow much further.
 - Several tests previously pinned the authored render distances (75 chunks). They now derive the
   expected neighbourhood from `ChunkStreamingSettings`, since those distances are tuning rather
-  than a contract.
+  than a contract. The authored value is currently horizontal 3 / vertical 2 (245 chunks).
