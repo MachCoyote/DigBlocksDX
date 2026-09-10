@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Unity.Collections;
 
 namespace DigBlocks.Voxels
@@ -15,10 +14,8 @@ namespace DigBlocks.Voxels
         public const int MaxPaletteEntries = 1 << MaxIndirectBits;
         public const int DirectBits = 32;
 
-        [ThreadStatic] private static ushort[] scratchEntries;
         [ThreadStatic] private static uint[] scratchCells;
-        [ThreadStatic] private static Dictionary<uint, int> scratchIndices;
-        [ThreadStatic] private static List<uint> scratchOrder;
+        [ThreadStatic] private static PackedChannelData scratchPacked;
 
         private NativeList<uint> palette;
         //cells packed at BitsPerEntry and never straddling a word, so reading one is a shift and a
@@ -38,65 +35,12 @@ namespace DigBlocks.Voxels
             BitsPerEntry = 0;
         }
 
-        //Bulk load. Driving Set per cell re-reads the cell, probes the palette map and can rewrite the
-        //whole channel mid-build when the palette outgrows its width. This collects the palette in one
-        //pass, picks the final width up front, and packs the cells once.
+        //one packing implementation serves storage, the wire and worldgen; this is the storage end of it.
         public static PaletteChannel FromValues(ReadOnlySpan<uint> values)
         {
-            if (values.Length != ChunkLayout.Volume)
-                throw new ArgumentException("A channel load requires exactly one chunk of cells.", nameof(values));
-
-            //scratch is per thread and reused for the life of that thread: a load runs this once per
-            //channel per chunk, and freshly allocating it each time was the bulk of the remaining garbage.
-            var indices = scratchIndices ??= new Dictionary<uint, int>();
-            var order = scratchOrder ??= new List<uint>();
-            //a chunk cannot hold more distinct values than cells, so an entry always fits a ushort.
-            var entries = scratchEntries ??= new ushort[ChunkLayout.Volume];
-            indices.Clear(); order.Clear();
-            for (int i = 0; i < values.Length; i++)
-            {
-                if (!indices.TryGetValue(values[i], out int entry))
-                {
-                    entry = order.Count;
-                    order.Add(values[i]);
-                    indices.Add(values[i], entry);
-                }
-                entries[i] = (ushort)entry;
-            }
-
-            var channel = default(PaletteChannel);
-            bool direct = order.Count > MaxPaletteEntries;
-            //Direct storage holds raw values in its cells, so it carries no palette at all.
-            channel.palette = new NativeList<uint>(direct ? 0 : order.Count, Allocator.Persistent);
-            if (!direct) for (int i = 0; i < order.Count; i++) channel.palette.Add(order[i]);
-
-            if (order.Count == 1)
-            {
-                channel.words = new NativeList<ulong>(0, Allocator.Persistent);
-                channel.lookup = default;
-                channel.Storage = ChannelStorage.Uniform;
-                channel.BitsPerEntry = 0;
-                return channel;
-            }
-
-            channel.Storage = direct ? ChannelStorage.Direct : ChannelStorage.Indirect;
-            channel.BitsPerEntry = direct ? DirectBits : BitsFor(order.Count);
-            int wordCount = WordCount(channel.BitsPerEntry);
-            channel.words = new NativeList<ulong>(wordCount, Allocator.Persistent);
-            //cleared so a word's padding bits are deterministic rather than whatever the allocator left.
-            channel.words.Resize(wordCount, NativeArrayOptions.ClearMemory);
-            var packed = channel.words.AsArray();
-            if (direct) for (int i = 0; i < values.Length; i++) Write(packed, i, values[i], DirectBits);
-            else for (int i = 0; i < values.Length; i++) Write(packed, i, entries[i], channel.BitsPerEntry);
-
-            //Direct storage needs no reverse map either; the promote path disposes it too.
-            if (direct) channel.lookup = default;
-            else
-            {
-                channel.lookup = new NativeParallelHashMap<uint, int>(Math.Max(16, order.Count), Allocator.Persistent);
-                for (int i = 0; i < order.Count; i++) channel.lookup.Add(order[i], i);
-            }
-            return channel;
+            var scratch = scratchPacked ??= new PackedChannelData();
+            PackedChannelData.Pack(values, scratch);
+            return FromPacked(scratch);
         }
 
         public uint Get(int index)

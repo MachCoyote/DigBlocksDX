@@ -160,10 +160,10 @@ namespace DigBlocks.Voxels.Runtime.Tests
         private sealed class CountingSource : IAuthoritativeChunkSource
         {
             public int Calls;
-            public CellEdit[] LoadOrGenerate(ChunkAddress address)
+            public void Generate(ChunkAddress address, uint[] solids, uint[] fluids)
             {
-                Calls++;
-                return new[] { new CellEdit(0, 1, 0) };
+                System.Threading.Interlocked.Increment(ref Calls);
+                solids[0] = 1;
             }
         }
     }

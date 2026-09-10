@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using DigBlocks.Voxels;
 using DigBlocks.Voxels.Runtime;
 using Unity.Mathematics;
@@ -26,21 +25,22 @@ namespace DigBlocks.Bootstrap
             test = registry.LookupSolid("digblocks:testblock");
         }
 
-        public CellEdit[] LoadOrGenerate(ChunkAddress address)
+        //runs on a worker thread; the buffers arrive cleared to air, so anything outside the fixture
+        //simply writes nothing.
+        public void Generate(ChunkAddress address, uint[] solids, uint[] fluids)
         {
             if (address.World != worldId || address.Position.y != 0 ||
                 address.Position.x < -NoiseChunkRadius || address.Position.x > NoiseChunkRadius ||
                 address.Position.z < -NoiseChunkRadius || address.Position.z > NoiseChunkRadius)
-                return Array.Empty<CellEdit>();
+                return;
 
-            return address.Position.x >= -1 && address.Position.x <= 1 && address.Position.z >= -1 && address.Position.z <= 1
-                ? ExistingFixture(address.Position.x, address.Position.z)
-                : PerlinTerrain(address.Position.x, address.Position.z);
+            if (address.Position.x >= -1 && address.Position.x <= 1 && address.Position.z >= -1 && address.Position.z <= 1)
+                ExistingFixture(address.Position.x, address.Position.z, solids);
+            else PerlinTerrain(address.Position.x, address.Position.z, solids);
         }
 
-        private CellEdit[] ExistingFixture(int cx, int cz)
+        private void ExistingFixture(int cx, int cz, uint[] solids)
         {
-            var edits = new List<CellEdit>(ChunkLayout.Edge * ChunkLayout.Edge * 16);
             for (int z = 0; z < ChunkLayout.Edge; z++)
             for (int x = 0; x < ChunkLayout.Edge; x++)
             {
@@ -50,17 +50,13 @@ namespace DigBlocks.Bootstrap
                 if (wall) height = 22;
                 bool marker = wx >= -12 && wx < -6 && wz >= -12 && wz < -6;
                 for (int y = 0; y < height; y++)
-                {
-                    uint block = y == 0 ? bedrock : wall ? stone : y == height - 1 ? (marker ? test : grass) : y >= height - 3 ? dirt : stone;
-                    edits.Add(new CellEdit(ChunkLayout.Index(new int3(x, y, z)), block, 0));
-                }
+                    solids[ChunkLayout.Index(new int3(x, y, z))] =
+                        y == 0 ? bedrock : wall ? stone : y == height - 1 ? (marker ? test : grass) : y >= height - 3 ? dirt : stone;
             }
-            return edits.ToArray();
         }
 
-        private CellEdit[] PerlinTerrain(int cx, int cz)
+        private void PerlinTerrain(int cx, int cz, uint[] solids)
         {
-            var edits = new List<CellEdit>(ChunkLayout.Edge * ChunkLayout.Edge * 6);
             for (int z = 0; z < ChunkLayout.Edge; z++)
             for (int x = 0; x < ChunkLayout.Edge; x++)
             {
@@ -70,12 +66,9 @@ namespace DigBlocks.Bootstrap
                 int dirtY = 2 + extraStone;
                 int grassY = dirtY + 1;
                 for (int y = 0; y <= grassY; y++)
-                {
-                    uint block = y == 0 ? bedrock : y < dirtY ? stone : y == dirtY ? dirt : grass;
-                    edits.Add(new CellEdit(ChunkLayout.Index(new int3(x, y, z)), block, 0));
-                }
+                    solids[ChunkLayout.Index(new int3(x, y, z))] =
+                        y == 0 ? bedrock : y < dirtY ? stone : y == dirtY ? dirt : grass;
             }
-            return edits.ToArray();
         }
     }
 }

@@ -159,6 +159,7 @@ namespace DigBlocks.Networking.NetCode
         public void Tick(double now)
         {
             if (disposed) return;
+            store.PumpLoads();
             int budget = options.GlobalBytesPerTick;
             int count = order.Count;
             if (count == 0) return;
@@ -206,7 +207,9 @@ namespace DigBlocks.Networking.NetCode
                 if (IsBusy(peer, index)) continue;
                 var lease = peer.Leases[index];
                 if (peer.Baselines[index] == lease.Revision) continue;
-                store.EnsureLoaded(lease, source);
+                //a chunk still being generated on a worker is skipped, not waited on; the cursor comes
+                //back round to it once PumpLoads has adopted the result.
+                if (store.RequestLoad(lease, source) != ChunkLoadState.Loaded) continue;
                 if (peer.Baselines[index] == lease.Revision) continue;
                 var transfer = new Transfer
                 {

@@ -60,6 +60,24 @@ namespace DigBlocks.Voxels
             return new ChunkData(address, incarnation, loadedSolids, loadedFluids) { Revision = revision };
         }
 
+        /// <summary>
+        /// One-shot bulk load of a freshly created chunk: replaces both channels outright rather than
+        /// walking every generated cell through the per-cell mutation path.
+        /// </summary>
+        public void LoadGenerated(PackedChannelData solid, PackedChannelData fluid)
+        {
+            RequireAlive();
+            if (Revision != 1) throw new InvalidOperationException("A generated load must precede any edit.");
+            readers.Complete();
+            var loadedSolids = PaletteChannel.FromPacked(solid);
+            PaletteChannel loadedFluids;
+            try { loadedFluids = PaletteChannel.FromPacked(fluid); }
+            catch { loadedSolids.Dispose(); throw; }
+            solids.Dispose(); fluids.Dispose();
+            solids = loadedSolids; fluids = loadedFluids;
+            Revision = 2;
+        }
+
         /// <summary>Copies both channels out in the layout they are stored in, fencing outstanding readers.</summary>
         public void CopyPacked(PackedChannelData solid, PackedChannelData fluid)
         {

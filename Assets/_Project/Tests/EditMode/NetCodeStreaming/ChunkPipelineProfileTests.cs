@@ -24,24 +24,22 @@ namespace DigBlocks.Networking.NetCode.Tests
         private sealed class LayeredSource : IAuthoritativeChunkSource
         {
             public int Calls; public double Seconds;
-            public CellEdit[] LoadOrGenerate(ChunkAddress address)
+            public void Generate(ChunkAddress address, uint[] solids, uint[] fluids)
             {
                 var clock = Stopwatch.StartNew();
                 try
                 {
-                    if (address.Position.y != 0) return Array.Empty<CellEdit>();
-                    var edits = new List<CellEdit>(ChunkLayout.Volume);
+                    if (address.Position.y != 0) return;
                     for (int y = 0; y < ChunkLayout.Edge; y++)
                     for (int z = 0; z < ChunkLayout.Edge; z++)
                     for (int x = 0; x < ChunkLayout.Edge; x++)
                     {
                         int height = 12 + ((x * 7 + z * 13 + address.Position.x * 3 + address.Position.z * 5) & 7);
                         uint solid = y == 0 ? 1u : y < height - 4 ? 2u : y < height - 1 ? 3u : y < height ? 4u : 0u;
-                        if (solid != 0) edits.Add(new CellEdit(ChunkLayout.Index(new int3(x, y, z)), solid, 0));
+                        if (solid != 0) solids[ChunkLayout.Index(new int3(x, y, z))] = solid;
                     }
-                    return edits.ToArray();
                 }
-                finally { Calls++; Seconds += clock.Elapsed.TotalSeconds; }
+                finally { System.Threading.Interlocked.Increment(ref Calls); Seconds += clock.Elapsed.TotalSeconds; }
             }
         }
 

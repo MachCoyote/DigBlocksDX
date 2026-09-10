@@ -9,6 +9,8 @@ using Unity.Mathematics;
 
 namespace DigBlocks.Voxels.Runtime
 {
+    public enum ChunkLoadState { Loaded, Pending }
+
     public struct ResidentChunk : IComponentData
     { public ChunkAddress Address; public ulong Incarnation, Revision; }
 
@@ -40,11 +42,28 @@ namespace DigBlocks.Voxels.Runtime
         //sequential on the owning thread, so one scratch pair each serves every chunk.
         private readonly PackedChannelData encodeSolids = new(), encodeFluids = new();
         private readonly PackedChannelData publishSolids = new(), publishFluids = new();
+        private readonly Dictionary<ChunkAddress, PendingLoad> pendingLoads = new();
+        private readonly Stack<PendingLoad> loadPool = new();
+        private readonly List<ChunkAddress> completedLoads = new();
+        private readonly int maxConcurrentLoads;
         private ulong nextIncarnation = 1;
         private bool disposed;
         private bool replicas;
         private ChunkInterest interest;
         private const int HistoryRevisions = 8, HistoryCells = 4096;
+        //one chunk being generated on a worker. The scratch travels with it, so a steady load recycles a
+        //bounded set instead of allocating a quarter of a megabyte per chunk.
+        private sealed class PendingLoad
+        {
+            public ChunkAddress Address;
+            public ulong Incarnation;
+            public readonly uint[] Solids = new uint[ChunkLayout.Volume];
+            public readonly uint[] Fluids = new uint[ChunkLayout.Volume];
+            public readonly PackedChannelData PackedSolids = new(), PackedFluids = new();
+            public volatile bool Done;
+            public Exception Error;
+        }
+
         private sealed class Entry
         {
             public ChunkData Data; public Entity Entity; public int Leases, HistoryCellCount;
@@ -52,11 +71,13 @@ namespace DigBlocks.Voxels.Runtime
             public ulong[] FaceHashes;
             public readonly Queue<ChunkDelta> History = new();
         }
-        internal ResidentChunkStore(EntityManager manager, BlockRegistry registry, int maxResidents)
+        internal ResidentChunkStore(EntityManager manager, BlockRegistry registry, int maxResidents, int maxConcurrentLoads)
         {
             if (registry == null) throw new ArgumentNullException(nameof(registry));
             if (maxResidents < 1 || maxResidents > 65536) throw new ArgumentOutOfRangeException(nameof(maxResidents));
+            if (maxConcurrentLoads < 1 || maxConcurrentLoads > 64) throw new ArgumentOutOfRangeException(nameof(maxConcurrentLoads));
             this.manager = manager; this.registry = registry; this.maxResidents = maxResidents;
+            this.maxConcurrentLoads = maxConcurrentLoads;
             ownerThread = Thread.CurrentThread.ManagedThreadId;
         }
         public int Count => chunks.Count;
@@ -226,23 +247,97 @@ namespace DigBlocks.Voxels.Runtime
             return true;
         }
 
+        /// <summary>
+        /// Starts generating the leased chunk if it is not resident yet, and reports whether it can be
+        /// read now. Generation runs on a worker; PumpLoads adopts the result. A caller told Pending
+        /// should move on and come back rather than wait.
+        /// </summary>
+        public ChunkLoadState RequestLoad(ChunkLease lease, IAuthoritativeChunkSource source)
+        {
+            Validate(lease);
+            var entry = chunks[lease.Address];
+            if (entry.Loaded) return ChunkLoadState.Loaded;
+            if (source == null) { entry.Loaded = true; Stamp(entry, lease.Address); return ChunkLoadState.Loaded; }
+            if (pendingLoads.ContainsKey(lease.Address)) return ChunkLoadState.Pending;
+            //bounded so a wide interest cannot put thousands of generations in flight at once, each
+            //holding its own chunk of scratch.
+            if (pendingLoads.Count >= maxConcurrentLoads) return ChunkLoadState.Pending;
+            var load = Rent(lease);
+            pendingLoads.Add(lease.Address, load);
+            //a rejected queue means the pool is saturated, so run it here rather than lose the chunk.
+            if (!ThreadPool.QueueUserWorkItem(_ => Generate(load, source))) Generate(load, source);
+            return ChunkLoadState.Pending;
+        }
+
+        /// <summary>Generates the leased chunk on the calling thread and adopts it before returning.</summary>
         public void EnsureLoaded(ChunkLease lease, IAuthoritativeChunkSource source)
         {
             Validate(lease);
             var entry = chunks[lease.Address];
             if (entry.Loaded) return;
-            var edits = source?.LoadOrGenerate(lease.Address) ?? Array.Empty<CellEdit>();
-            if (edits == null) throw new InvalidOperationException("Chunk source returned no result.");
-            ValidateEdits(edits);
-            entry.Data.Apply(edits, registry.MaxSolidStateId, registry.MaxFluidStateId);
-            manager.SetComponentData(entry.Entity, new ResidentChunk
-            {
-                Address = lease.Address,
-                Incarnation = lease.Incarnation,
-                Revision = lease.Data.Revision
-            });
-            entry.Loaded = true;
+            if (source == null) { entry.Loaded = true; Stamp(entry, lease.Address); return; }
+            if (pendingLoads.ContainsKey(lease.Address))
+                throw new InvalidOperationException("The chunk is already generating on a worker.");
+            var load = Rent(lease);
+            try { Generate(load, source); Adopt(load); }
+            finally { loadPool.Push(load); }
         }
+
+        private PendingLoad Rent(ChunkLease lease)
+        {
+            var load = loadPool.Count > 0 ? loadPool.Pop() : new PendingLoad();
+            load.Address = lease.Address; load.Incarnation = lease.Incarnation;
+            load.Error = null; load.Done = false;
+            //a source fills only what it means to place, so the rest has to arrive as air.
+            Array.Clear(load.Solids, 0, ChunkLayout.Volume);
+            Array.Clear(load.Fluids, 0, ChunkLayout.Volume);
+            return load;
+        }
+
+        //runs on a worker: no Unity APIs, no store access, no native containers.
+        private static void Generate(PendingLoad load, IAuthoritativeChunkSource source)
+        {
+            try
+            {
+                source.Generate(load.Address, load.Solids, load.Fluids);
+                PackedChannelData.Pack(load.Solids, load.PackedSolids);
+                PackedChannelData.Pack(load.Fluids, load.PackedFluids);
+            }
+            catch (Exception exception) { load.Error = exception; }
+            finally { load.Done = true; }
+        }
+
+        public void PumpLoads()
+        {
+            if (disposed || pendingLoads.Count == 0) return;
+            RequireAlive();
+            completedLoads.Clear();
+            foreach (var pair in pendingLoads) if (pair.Value.Done) completedLoads.Add(pair.Key);
+            foreach (var address in completedLoads)
+            {
+                var load = pendingLoads[address];
+                pendingLoads.Remove(address);
+                try { Adopt(load); }
+                finally { loadPool.Push(load); }
+            }
+        }
+
+        //a chunk released or re-entered while its generation was in flight is simply dropped.
+        private void Adopt(PendingLoad load)
+        {
+            if (load.Error != null) throw new InvalidOperationException($"Generating {load.Address} failed.", load.Error);
+            if (!chunks.TryGetValue(load.Address, out var entry)) return;
+            if (entry.Loaded || entry.Data.Incarnation != load.Incarnation) return;
+            ValidateStates(load.PackedSolids, true);
+            ValidateStates(load.PackedFluids, false);
+            RequirePermittedFluids(load.PackedSolids, load.PackedFluids);
+            entry.Data.LoadGenerated(load.PackedSolids, load.PackedFluids);
+            entry.Loaded = true;
+            Stamp(entry, load.Address);
+        }
+
+        private void Stamp(Entry entry, ChunkAddress address) => manager.SetComponentData(entry.Entity,
+            new ResidentChunk { Address = address, Incarnation = entry.Data.Incarnation, Revision = entry.Data.Revision });
 
         public void ClearReplicas()
         {
@@ -279,12 +374,7 @@ namespace DigBlocks.Voxels.Runtime
             if (previous != null && (previous.Data.Incarnation != incarnation || previous.Data.Revision > revision)) return false;
             ValidateStates(solids, true);
             ValidateStates(fluids, false);
-            //only the fluid cross-check is inherently per cell, and a chunk holding no fluid at all --
-            //which is nearly all of them -- skips it.
-            if (!(fluids.Storage == ChannelStorage.Uniform && fluids.Palette[0] == 0))
-                for (int i = 0; i < ChunkLayout.Volume; i++)
-                    if (fluids.Get(i) != 0 && !registry.GetSolid(solids.Get(i)).PermitsFluid)
-                        throw new ArgumentException("Replica solid does not permit fluid.");
+            RequirePermittedFluids(solids, fluids);
             if (previous != null && previous.Data.Revision == revision)
             {
                 for (int i = 0; i < ChunkLayout.Volume; i++)
@@ -337,6 +427,16 @@ namespace DigBlocks.Voxels.Runtime
         private void Probe(uint state, bool solid)
         {
             if (solid) registry.GetSolid(state); else registry.GetFluid(state);
+        }
+
+        //the only inherently per-cell check. A chunk holding no fluid at all, which is nearly all of
+        //them, skips it outright.
+        private void RequirePermittedFluids(PackedChannelData solids, PackedChannelData fluids)
+        {
+            if (fluids.Storage == ChannelStorage.Uniform && fluids.Palette[0] == 0) return;
+            for (int i = 0; i < ChunkLayout.Volume; i++)
+                if (fluids.Get(i) != 0 && !registry.GetSolid(solids.Get(i)).PermitsFluid)
+                    throw new ArgumentException("Chunk solid does not permit fluid.");
         }
 
         //solid values on one boundary plane, in the order ChunkMeshScheduler pads its neighbours.
@@ -459,13 +559,15 @@ namespace DigBlocks.Voxels.Runtime
     public partial class ChunkWorldSystem : SystemBase
     {
         public ResidentChunkStore Store { get; private set; }
-        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256)
+        //each concurrent load holds a chunk of generation scratch and its packed result, roughly
+        //640 KiB, so this trades memory for how many chunks a tick can start generating at once.
+        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256, int maxConcurrentLoads = 32)
         {
             if (Store != null) throw new InvalidOperationException("World already has a chunk store.");
-            return Store = new ResidentChunkStore(EntityManager, registry, maxResidents);
+            return Store = new ResidentChunkStore(EntityManager, registry, maxResidents, maxConcurrentLoads);
         }
         public void ReleaseStore() { Store?.Dispose(); Store = null; }
-        protected override void OnUpdate() { }
+        protected override void OnUpdate() => Store?.PumpLoads();
         protected override void OnDestroy() => ReleaseStore();
     }
 }
