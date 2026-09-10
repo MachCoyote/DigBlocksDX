@@ -4,7 +4,7 @@
 
 | Assembly | Kind | Definition | Internal references |
 | --- | --- | --- | --- |
-| `DigBlocks.Bootstrap` | Runtime | `Assets/_Project/Scripts/Bootstrap/DigBlocks.Bootstrap.asmdef` | DigBlocks.Client, DigBlocks.Client.Rendering, DigBlocks.Client.UI, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server, DigBlocks.Voxels, DigBlocks.Voxels.Content, DigBlocks.Voxels.Runtime |
+| `DigBlocks.Bootstrap` | Runtime | `Assets/_Project/Scripts/Bootstrap/DigBlocks.Bootstrap.asmdef` | DigBlocks.Client, DigBlocks.Client.Rendering, DigBlocks.Client.UI, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server, DigBlocks.Voxels, DigBlocks.Voxels.Content, DigBlocks.Voxels.Generation, DigBlocks.Voxels.Runtime |
 | `DigBlocks.ChunkProtocol` | Runtime | `Assets/_Project/Scripts/Networking/Chunks/DigBlocks.ChunkProtocol.asmdef` | DigBlocks.Voxels |
 | `DigBlocks.Client` | Runtime | `Assets/_Project/Scripts/Client/DigBlocks.Client.asmdef` | DigBlocks.Client.UI, DigBlocks.Core, DigBlocks.Networking |
 | `DigBlocks.Client.Rendering` | Runtime | `Assets/_Project/Scripts/Client/Rendering/DigBlocks.Client.Rendering.asmdef` | DigBlocks.Core, DigBlocks.Voxels, DigBlocks.Voxels.Appearance, DigBlocks.Voxels.Meshing, DigBlocks.Voxels.Runtime |
@@ -17,6 +17,7 @@
 | `DigBlocks.Voxels` | Runtime | `Assets/_Project/Scripts/Voxels/DigBlocks.Voxels.asmdef` | - |
 | `DigBlocks.Voxels.Appearance` | Runtime | `Assets/_Project/Scripts/Voxels/Appearance/DigBlocks.Voxels.Appearance.asmdef` | DigBlocks.Voxels |
 | `DigBlocks.Voxels.Content` | Runtime | `Assets/_Project/Scripts/Voxels/Content/DigBlocks.Voxels.Content.asmdef` | DigBlocks.Voxels |
+| `DigBlocks.Voxels.Generation` | Runtime | `Assets/_Project/Scripts/Voxels/Generation/DigBlocks.Voxels.Generation.asmdef` | DigBlocks.Voxels |
 | `DigBlocks.Voxels.Meshing` | Runtime | `Assets/_Project/Scripts/Voxels/Meshing/DigBlocks.Voxels.Meshing.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Appearance |
 | `DigBlocks.Voxels.Runtime` | Runtime | `Assets/_Project/Scripts/Voxels/Runtime/DigBlocks.Voxels.Runtime.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Voxels |
 | `DigBlocks.Bootstrap.PlayModeTests` | Test | `Assets/_Project/Tests/PlayMode/Bootstrap/DigBlocks.Bootstrap.PlayModeTests.asmdef` | DigBlocks.Bootstrap, DigBlocks.ChunkProtocol, DigBlocks.Client, DigBlocks.Client.Rendering, DigBlocks.Client.UI, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
@@ -30,6 +31,7 @@
 | `DigBlocks.NetCode.PlayModeTests` | Test | `Assets/_Project/Scripts/Networking/NetCode/PlayModeTests/DigBlocks.NetCode.PlayModeTests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Client, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
 | `DigBlocks.Voxels.Appearance.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelAppearance/DigBlocks.Voxels.Appearance.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Appearance |
 | `DigBlocks.Voxels.Content.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelContent/DigBlocks.Voxels.Content.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Content |
+| `DigBlocks.Voxels.Generation.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelGeneration/DigBlocks.Voxels.Generation.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Content, DigBlocks.Voxels.Generation |
 | `DigBlocks.Voxels.Meshing.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelMeshing/DigBlocks.Voxels.Meshing.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Appearance, DigBlocks.Voxels.Meshing |
 | `DigBlocks.Voxels.Runtime.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelRuntime/DigBlocks.Voxels.Runtime.Tests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
 | `DigBlocks.Voxels.Tests` | Test | `Assets/_Project/Tests/EditMode/Voxels/DigBlocks.Voxels.Tests.asmdef` | DigBlocks.Voxels |

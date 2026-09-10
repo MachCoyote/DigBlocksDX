@@ -16,6 +16,7 @@ Assets/_Project/
 │   │   └── UI/               menu navigation, menu views, persistent UI root
 │   ├── Server/               authoritative server-world coordination
 │   ├── Voxels/               chunk storage, block definitions, registry, appearance
+│   │   └── Generation/     world types, layered terrain, deterministic noise
 │   └── Bootstrap/            Unity entry point and composition root
 └── Tests/
     ├── EditMode/             fast Core and Bootstrap contract tests
@@ -78,6 +79,7 @@ transport-specific implementation.
 | Portable network contract or admission policy | `Scripts/Networking`, then `docs/network-session-foundation.md` |
 | Chunk storage, registry, or portable codec | `Scripts/Voxels`, `Scripts/Networking/Chunks`, and their EditMode tests |
 | Block definitions, archetypes, or block content | `Assets/StreamingAssets/content/digblocks`, `Scripts/Voxels/Definitions`, then `docs/block-definitions.md` |
+| World types, terrain shape, noise authoring, or seeds | `Scripts/Voxels/Generation`, then `docs/terrain-generation.md` |
 | NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
@@ -131,6 +133,9 @@ presentation and authoring code must be removable from this build.
 - `DigBlocks.Client.UI` owns menu navigation, menu creation, menu views and the
   persistent UI root. It is client presentation only and holds no session,
   simulation or transport knowledge.
+- `DigBlocks.Voxels.Generation` owns world types, layered terrain shaping and the
+  deterministic noise the seed drives. It depends on `DigBlocks.Voxels` alone, so it
+  stays usable from tests and offline tools and carries no ECS or transport knowledge.
 - `DigBlocks.Server` owns authoritative server-world coordination.
 - `DigBlocks.Networking` owns transport-independent session and protocol
   contracts.
@@ -251,6 +256,7 @@ ownership, failure handling and the next integration boundary.
    model.
 5. Add chunk interest, snapshot, delta, and transmission systems.
 6. Add client meshing and rendering.
+7. Add terrain generation: world types, layered shaping and deterministic seeds.
 7. Add dynamic entity simulation and ghost authoring incrementally.
 
 This sequence deliberately establishes connection and world ownership before
@@ -259,7 +265,7 @@ and offline tools.
 
 ## Terrain presentation
 
-The client meshing and indirect rendering milestone is documented in [chunk meshing and terrain rendering](chunk-meshing-rendering.md), with the later conservative portal-culling work recorded in the [terrain chunk occlusion implementation summary](terrain-chunk-occlusion-summary.md), per-camera submission in the [terrain secondary camera implementation summary](terrain-secondary-camera-summary.md), and the moving residency path in the [dynamic chunk loading implementation summary](dynamic-chunk-loading.md). The transfer stage was later pipelined; see the [chunk streaming throughput summary](chunk-streaming-throughput.md), and the per-chunk main-thread cost of applying one in the [chunk apply frame cost summary](chunk-apply-frame-cost.md). `DigBlocks.Voxels.Meshing` owns Burst greedy geometry, packed quad contracts and revision-matched chunk face connectivity; `DigBlocks.Client.Rendering` owns scheduling, camera graph traversal, GPU memory, shaders, the inspection camera, and which cameras terrain is submitted to. Replica publication/removal/reset notifications originate in Voxels.Runtime. Bootstrap composes presentation only for graphical clients and supplies a bounded authoritative development fixture/Perlin source through ordinary replication.
+The client meshing and indirect rendering milestone is documented in [chunk meshing and terrain rendering](chunk-meshing-rendering.md), with the later conservative portal-culling work recorded in the [terrain chunk occlusion implementation summary](terrain-chunk-occlusion-summary.md), per-camera submission in the [terrain secondary camera implementation summary](terrain-secondary-camera-summary.md), and the moving residency path in the [dynamic chunk loading implementation summary](dynamic-chunk-loading.md). The transfer stage was later pipelined; see the [chunk streaming throughput summary](chunk-streaming-throughput.md), and the per-chunk main-thread cost of applying one in the [chunk apply frame cost summary](chunk-apply-frame-cost.md). `DigBlocks.Voxels.Meshing` owns Burst greedy geometry, packed quad contracts and revision-matched chunk face connectivity; `DigBlocks.Client.Rendering` owns scheduling, camera graph traversal, GPU memory, shaders, the inspection camera, and which cameras terrain is submitted to. Replica publication/removal/reset notifications originate in Voxels.Runtime. Bootstrap composes presentation only for graphical clients and builds the world's terrain generator as a disposable service feeding the authoritative chunk source; see [terrain generation](terrain-generation.md).
 
 Rapid movement across coalesced interest epochs preserves authoritative incarnation replacement and
 per-chunk recovery as recorded in [chunk interest incarnation recovery](chunk-interest-incarnation-recovery.md).

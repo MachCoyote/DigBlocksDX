@@ -2,7 +2,9 @@
 
 ## Status
 
-Approved design for the first terrain generation phase, September 10, 2026.
+Historical. This is the design the work was planned from; the implementation is
+recorded in [terrain-generation.md](terrain-generation.md), which is current where
+the two differ. Approved September 10, 2026.
 Phase 1 delivers deterministic layered terrain and replaces the bootstrap
 fixture. Biomes, trees, structures, ores and caves are explicitly out of scope
 and are represented only as named seams.
