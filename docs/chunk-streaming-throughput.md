@@ -99,6 +99,27 @@ Paths are relative to `Assets/_Project/Scripts`.
 - `ChunkStreamingThroughputTests` is the standing regression guard against returning to
   stop-and-wait: it asserts convergence within a tick budget and that no transfer was retried.
 
+## Unverified: what now caps load speed
+
+Recorded September 9, 2026 as a hypothesis, not a measurement. Nobody has tested it.
+
+A 245-chunk neighbourhood converges in about 125 ticks, roughly 2 chunks per tick. The client-side
+apply budget is not what caps that: budgets of 2, 3 and 4 all converge in the same 125 ticks, and
+only a budget of 1 is slower. So the limit is in the transfer stage.
+
+The likely mechanism is in-flight window depth against snapshot latency. One transfer takes about
+three ticks to go request, capture, encode, send, because the snapshot pump hands work to a worker
+and picks the result up on a later tick. With `PeerWindow` at 8 that gives roughly 8 / 3, near the
+2.7 chunks per tick actually observed.
+
+If that is right, raising `PeerWindow` is the cheap lever, and it is already an authored field on
+`ChunkStreamingSettings`. It costs one value change and a re-measure. Sweep it over a full load the
+way `AppliesPerTick` was swept, and watch that `MaxBufferedPayloads` stays above it and that the
+apply budget does not become the new cap.
+
+Try this before the larger wire-format work described in
+[chunk-apply-frame-cost.md](chunk-apply-frame-cost.md).
+
 ## Deferred work
 
 - The single-player direct-delivery bypass is designed but deliberately not built now that the

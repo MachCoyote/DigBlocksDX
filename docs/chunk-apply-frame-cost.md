@@ -120,13 +120,34 @@ Paths are relative to `Assets/_Project/Scripts`.
   storage classes and the write that pushes a bulk-loaded palette past the width the load chose,
   which is the case the new construction path could plausibly break.
 
-## Deferred work
+## Decisions on the two remaining options
 
-Both remaining options are now throughput work rather than smoothness work, since the worst frame
-already fits comfortably inside the budget.
+The worst frame already fits comfortably inside the budget, so both of these are throughput work
+rather than smoothness work.
 
-- Moving decode and channel construction off the main thread would free roughly 1.7 ms of main
-  thread per tick, which matters only if the apply budget becomes the limit on load speed.
-- Making the wire format carry the storage layout directly would make applying a chunk a palette
-  read plus a memcpy, removing most of the remaining per-chunk work. Larger change, and it
-  constrains the protocol to the storage representation.
+### Off-thread decode: rejected
+
+Moving decode and channel construction to a worker thread was considered and deliberately not done.
+
+- Only part of the cost can move. `PublishReplica` writes an entity and raises the mesh
+  invalidation event, and `EntityManager` is not thread safe, so the store half stays on the main
+  thread whatever happens. The movable part is roughly two thirds of an already small cost.
+- It would undo the single reused buffer pair that the current design depends on: concurrent
+  decodes need a real pool again, reintroducing the allocation pressure that was just removed.
+- It was never a fix for the frame spikes anyway. Those were stop-the-world collections, which
+  stall the main thread regardless of which thread allocated.
+
+Revisit only if profiling shows the main thread starved during loading for some other reason.
+
+### Wire format carrying the storage layout: available, not scheduled
+
+Applying a chunk would become a palette read plus a memcpy, removing most of the remaining ~1.4 ms
+per chunk. Validation would also get cheaper without getting weaker, since it would check a palette
+of at most a few hundred entries instead of all 32,768 cells.
+
+The price is that `ChunkWireCodec`'s format becomes coupled to `PaletteChannel`'s internal
+representation. Today the two are independent: storage can change without touching the protocol and
+vice versa. After this, every storage change is a protocol change or needs a translation layer.
+
+Worth doing if load time rather than frame smoothness becomes the goal, and only then. See
+[chunk-streaming-throughput.md](chunk-streaming-throughput.md) for the cheaper lever to try first.
