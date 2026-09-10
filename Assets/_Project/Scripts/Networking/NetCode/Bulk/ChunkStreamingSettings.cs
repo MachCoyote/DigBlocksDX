@@ -16,8 +16,10 @@ namespace DigBlocks.Networking.NetCode
         [Min(BulkDriver.MaxPayloadBytes)] public int GlobalBytesPerTick = 262144;
         [Tooltip("Bytes the server may send to one peer in one tick.")]
         [Min(BulkDriver.MaxPayloadBytes)] public int PeerBytesPerTick = 131072;
-        [Tooltip("Chunks in flight to one peer at once. Higher values overlap encoding with transfer.")]
-        [Range(1, 64)] public int PeerWindow = 8;
+        [Tooltip("Chunks outstanding to one peer at once, counting those already sent and waiting to be "
+            + "applied. Most hold no payload, so this can be deep; it is what stops acknowledgement "
+            + "latency from capping the load rate.")]
+        [Range(1, 1024)] public int PeerWindow = 8;
         [Tooltip("Encoded chunk payloads held across all peers. Bounds the transfer stage's memory.")]
         [Range(2, 256)] public int MaxBufferedPayloads = 64;
         [Tooltip("Chunks the client decodes and stores per tick. Bounds how much of a frame an arriving "
@@ -29,7 +31,7 @@ namespace DigBlocks.Networking.NetCode
             if (WorldId < 1) throw new InvalidOperationException("Chunk streaming requires a positive world ID.");
             return new ChunkStreamingOptions(HorizontalRenderDistanceChunks, VerticalRenderDistanceChunks,
                 GlobalBytesPerTick, PeerBytesPerTick, MaxBufferedPayloads, worldId: (uint)WorldId,
-                peerWindow: Math.Min(PeerWindow, MaxBufferedPayloads), appliesPerTick: AppliesPerTick);
+                peerWindow: PeerWindow, appliesPerTick: AppliesPerTick);
         }
 
         private void OnValidate()
@@ -40,7 +42,7 @@ namespace DigBlocks.Networking.NetCode
             GlobalBytesPerTick = Math.Clamp(GlobalBytesPerTick, BulkDriver.MaxPayloadBytes, 8388608);
             PeerBytesPerTick = Math.Clamp(PeerBytesPerTick, BulkDriver.MaxPayloadBytes, GlobalBytesPerTick);
             MaxBufferedPayloads = Math.Clamp(MaxBufferedPayloads, 2, 256);
-            PeerWindow = Math.Clamp(PeerWindow, 1, Math.Min(64, MaxBufferedPayloads));
+            PeerWindow = Math.Clamp(PeerWindow, 1, 1024);
             AppliesPerTick = Math.Clamp(AppliesPerTick, 1, 64);
             if (ChunkInterest.CountFor(HorizontalRenderDistanceChunks, VerticalRenderDistanceChunks) > ChunkInterest.MaximumChunks)
                 Debug.LogWarning($"Chunk streaming distance exceeds the {ChunkInterest.MaximumChunks}-chunk interest limit.", this);

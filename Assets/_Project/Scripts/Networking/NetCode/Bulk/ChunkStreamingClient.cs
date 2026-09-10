@@ -44,7 +44,10 @@ namespace DigBlocks.Networking.NetCode
         {
             this.store = store; maxSolid = registry.MaxSolidStateId; maxFluid = registry.MaxFluidStateId; this.options = options;
             this.send = send; this.fail = fail; deadline = now + options.ProgressTimeout;
-            assembler = new ChunkTransferReassembler(options.PeerWindow, options.PeerWindow * ChunkWireCodec.MaxDeltaBytes);
+            //concurrent reassembly is bounded by the payloads the server has mid-flight, not by how many
+            //chunks it has outstanding: a transfer leaves reassembly when its last slice lands, long
+            //before the acknowledgement frees its window slot.
+            assembler = new ChunkTransferReassembler(options.MaxPayloads, options.MaxPayloads * ChunkWireCodec.MaxDeltaBytes);
         }
 
         public bool RequestInterest(ChunkAddress anchor)

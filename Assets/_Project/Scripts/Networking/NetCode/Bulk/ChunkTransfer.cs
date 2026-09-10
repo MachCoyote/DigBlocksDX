@@ -208,7 +208,9 @@ namespace DigBlocks.Networking.NetCode
     //connection-local staging only; the caller validates live subscriptions and applies decoded data before ACK.
     public sealed class ChunkTransferReassembler
     {
-        private const int TransferLimit = 64;
+        //matches the largest payload budget a peer may be given, since that is what bounds how many
+        //transfers can be mid-reassembly at once.
+        private const int TransferLimit = 256;
         private const int ByteLimit = TransferLimit * ChunkWireCodec.MaxDeltaBytes;
         private readonly int maxTransfers, maxTotalBytes;
         private readonly Dictionary<ulong, Pending> pending = new();

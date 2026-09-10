@@ -27,9 +27,7 @@ namespace DigBlocks.Networking.NetCode
             if (globalBytesPerTick < BulkDriver.MaxPayloadBytes || globalBytesPerTick > 8388608) throw new ArgumentOutOfRangeException(nameof(globalBytesPerTick));
             if (peerBytesPerTick < BulkDriver.MaxPayloadBytes || peerBytesPerTick > globalBytesPerTick) throw new ArgumentOutOfRangeException(nameof(peerBytesPerTick));
             if (maxPayloads < 2 || maxPayloads > 256) throw new ArgumentOutOfRangeException(nameof(maxPayloads));
-            if (peerWindow < 1 || peerWindow > 64) throw new ArgumentOutOfRangeException(nameof(peerWindow));
-            //a peer can never hold more in flight than the shared payload budget allows.
-            peerWindow = Math.Min(peerWindow, maxPayloads);
+            if (peerWindow < 1 || peerWindow > 1024) throw new ArgumentOutOfRangeException(nameof(peerWindow));
             if (appliesPerTick < 1 || appliesPerTick > 64) throw new ArgumentOutOfRangeException(nameof(appliesPerTick));
             if (!(progressTimeout >= 1 && progressTimeout <= 120)) throw new ArgumentOutOfRangeException(nameof(progressTimeout));
             HorizontalRadius = horizontalRadius; VerticalRadius = verticalRadius; GlobalBytesPerTick = globalBytesPerTick;
@@ -60,18 +58,10 @@ namespace DigBlocks.Networking.NetCode
         public int PeakEncodedPayloadBytes { get; private set; }
 
         //encoded payloads still being sliced, across every peer. This is the memory bound on the
-        //transfer stage and stays capped by options.MaxPayloads.
-        public int PayloadCount
-        {
-            get
-            {
-                int count = 0;
-                foreach (var peer in peers.Values)
-                    foreach (var transfer in peer.Transfers)
-                        if (transfer.Payload != null) count++;
-                return count;
-            }
-        }
+        //transfer stage and stays capped by options.MaxPayloads. A deep window makes the transfer list
+        //long, so this is a counter rather than a walk of every peer's transfers.
+        public int PayloadCount { get; private set; }
+        private long payloadBytes;
 
         private sealed class Peer
         {
@@ -206,6 +196,8 @@ namespace DigBlocks.Networking.NetCode
         {
             if (peer.Leases.Length == 0) return;
             int buffered = PayloadCount;
+            //PeerWindow bounds outstanding chunks, most of which have been sent and hold no payload;
+            //MaxPayloads bounds the encoded bytes actually waiting on the wire. They are separate now.
             for (int scanned = 0; scanned < peer.Leases.Length && peer.Transfers.Count < options.PeerWindow &&
                  buffered < options.MaxPayloads; scanned++)
             {
@@ -262,7 +254,7 @@ namespace DigBlocks.Networking.NetCode
                 else
                 {
                     transfer.Offset += length;
-                    if (transfer.Offset == transfer.Payload.Length) { transfer.Payload = null; transfer.AwaitingAck = true; }
+                    if (transfer.Offset == transfer.Payload.Length) { SetPayload(transfer, null); transfer.AwaitingAck = true; }
                 }
                 transfer.Deadline = now + options.ProgressTimeout;
                 idle = 0;
@@ -299,13 +291,20 @@ namespace DigBlocks.Networking.NetCode
         {
             if (nextTransfer == ulong.MaxValue) throw new InvalidOperationException("Transfer ID exhausted.");
             transfer.Id = nextTransfer++;
-            transfer.Payload = payload; transfer.Offset = 0; transfer.Started = false; transfer.AwaitingAck = false;
+            SetPayload(transfer, payload);
+            transfer.Offset = 0; transfer.Started = false; transfer.AwaitingAck = false;
             transfer.IsDelta = delta; transfer.Began = now; transfer.Deadline = now + options.ProgressTimeout;
-            int buffered = 0;
-            foreach (var item in peers.Values)
-                foreach (var live in item.Transfers) buffered += live.Payload?.Length ?? 0;
-            PeakEncodedPayloadBytes = Math.Max(PeakEncodedPayloadBytes, buffered);
+            PeakEncodedPayloadBytes = Math.Max(PeakEncodedPayloadBytes, (int)Math.Min(int.MaxValue, payloadBytes));
             if (delta) SentDeltas++; else SentSnapshots++;
+        }
+
+        //the one place a payload is attached or released, so the slot and byte counts stay exact
+        //without anything having to walk the transfer lists.
+        private void SetPayload(Transfer transfer, byte[] payload)
+        {
+            if (transfer.Payload != null) { PayloadCount--; payloadBytes -= transfer.Payload.Length; }
+            transfer.Payload = payload;
+            if (payload != null) { PayloadCount++; payloadBytes += payload.Length; }
         }
 
         private void RetryTransfer(Peer peer, Transfer transfer, double now)
@@ -325,13 +324,14 @@ namespace DigBlocks.Networking.NetCode
 
         private void Retire(Peer peer, Transfer transfer)
         {
-            transfer.Payload = null;
+            SetPayload(transfer, null);
             peer.Transfers.Remove(transfer);
             if (peer.Transfers.Count == 0) peer.RoundRobin = 0;
         }
 
         private void CancelAll(Peer peer)
         {
+            foreach (var transfer in peer.Transfers) SetPayload(transfer, null);
             peer.Transfers.Clear(); peer.RoundRobin = 0;
         }
 
