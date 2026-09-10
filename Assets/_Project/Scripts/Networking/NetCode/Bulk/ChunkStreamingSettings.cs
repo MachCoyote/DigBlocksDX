@@ -38,17 +38,16 @@ namespace DigBlocks.Networking.NetCode
         private void OnValidate()
         {
             WorldId = Math.Max(1, WorldId);
-            HorizontalRenderDistanceChunks = Math.Max(0, HorizontalRenderDistanceChunks);
-            VerticalRenderDistanceChunks = Math.Max(0, VerticalRenderDistanceChunks);
+            HorizontalRenderDistanceChunks = Math.Clamp(HorizontalRenderDistanceChunks, 0, ChunkInterest.MaximumRadius);
+            VerticalRenderDistanceChunks = Math.Clamp(VerticalRenderDistanceChunks, 0, ChunkInterest.MaximumRadius);
             GlobalBytesPerTick = Math.Clamp(GlobalBytesPerTick, BulkDriver.MaxPayloadBytes, 8388608);
             PeerBytesPerTick = Math.Clamp(PeerBytesPerTick, BulkDriver.MaxPayloadBytes, GlobalBytesPerTick);
             MaxBufferedPayloads = Math.Clamp(MaxBufferedPayloads, 2, 256);
             PeerWindow = Math.Clamp(PeerWindow, 1, Math.Min(64, MaxBufferedPayloads));
             SnapshotWorkers = Math.Clamp(SnapshotWorkers, 1, 64);
             AppliesPerTick = Math.Clamp(AppliesPerTick, 1, 64);
-            long width = 2L * HorizontalRenderDistanceChunks + 1;
-            if (width * width * (2L * VerticalRenderDistanceChunks + 1) > ChunkInterest.MaximumChunks)
-                Debug.LogWarning($"Chunk streaming distance exceeds the {ChunkInterest.MaximumChunks}-chunk development limit.", this);
+            if (ChunkInterest.CountFor(HorizontalRenderDistanceChunks, VerticalRenderDistanceChunks) > ChunkInterest.MaximumChunks)
+                Debug.LogWarning($"Chunk streaming distance exceeds the {ChunkInterest.MaximumChunks}-chunk interest limit.", this);
         }
     }
 }

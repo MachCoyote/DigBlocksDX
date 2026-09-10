@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using DigBlocks.ChunkProtocol;
 using DigBlocks.Client.Runtime;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Server.Runtime;
@@ -19,6 +20,11 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
 {
     public sealed class ChunkCompanionTests
     {
+        //the companion's own default streaming distance, so the shape of the interest owns this number.
+        private static readonly int DefaultResidency = (int)ChunkInterest.CountFor(
+            new ChunkStreamingOptions().HorizontalRadius, new ChunkStreamingOptions().VerticalRadius);
+        //the disjoint interest the late-join test moves one peer to: a single column, three high.
+        private static readonly int DisjointResidency = (int)ChunkInterest.CountFor(0, 1);
         private readonly List<GameHost> hosts = new();
         private readonly NullLogger logger = new();
         [UnityTest]
@@ -32,9 +38,9 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             await host.StartAsync(CancellationToken.None);
             Assert.That(bulk.ClientState, Is.EqualTo(ChunkConnectionState.Bound));
             Assert.That(bulk.BoundPeerCount, Is.EqualTo(1)); Assert.That(bulk.ListeningPort, Is.Not.Zero);
-            Assert.That(server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(9));
+            Assert.That(server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(DefaultResidency));
             await Until(() => bulk.ClientDataReady);
-            Assert.That(client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(9));
+            Assert.That(client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(DefaultResidency));
             using (var query = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame))) Assert.That(query.IsEmpty, Is.True);
             Assert.That(session.State, Is.EqualTo(NetworkSessionState.AwaitingWorldData));
             ushort port = bulk.ListeningPort;
@@ -51,7 +57,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var session = new NetCodeSession(NetworkSessionRole.ClientAndServer, new NetworkSessionOptions("127.0.0.1", 0, 1), () => client.World, () => server.World, logger, () => 120);
             var bulk = new ChunkCompanionService(session);
             await Host(server, client, session, bulk).StartAsync(CancellationToken.None);
-            await Until(() => bulk.ClientDataReady && bulk.AppliedChunkAcknowledgements >= 9);
+            await Until(() => bulk.ClientDataReady && bulk.AppliedChunkAcknowledgements >= DefaultResidency);
             var source = server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             var replica = client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             var address = new ChunkAddress(1, default);
@@ -91,14 +97,15 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var secondReplica = secondSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             Assert.That(secondReplica.TryReadReplica(address, out var late), Is.True);
             Assert.That(late.Revision, Is.EqualTo(lease.Revision)); Assert.That(late.SolidAt(42), Is.EqualTo(1));
-            Assert.That(source.Count, Is.EqualTo(9));
+            Assert.That(source.Count, Is.EqualTo(DefaultResidency));
             Assert.That(bulk.SetServerInterest(firstSession.LocalPeerId, new ChunkAddress(2, new Unity.Mathematics.int3(-4, 3, -8)), 0, 1), Is.True);
             var firstReplica = firstSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             await Until(() => firstReplica.InterestEpoch == 2 && first.ClientDataReady);
-            Assert.That(firstReplica.Count, Is.EqualTo(3)); Assert.That(source.Count, Is.EqualTo(12));
+            Assert.That(firstReplica.Count, Is.EqualTo(DisjointResidency));
+            Assert.That(source.Count, Is.EqualTo(DefaultResidency + DisjointResidency));
             Assert.That(firstReplica.TryReadReplica(address, out _), Is.False);
             await firstHost.StopAsync(CancellationToken.None);
-            await Until(() => bulk.BoundPeerCount == 1 && source.Count == 9);
+            await Until(() => bulk.BoundPeerCount == 1 && source.Count == DefaultResidency);
             Assert.That(second.ClientDataReady, Is.True); Assert.That(secondReplica.TryReadReplica(address, out _), Is.True);
         });
 

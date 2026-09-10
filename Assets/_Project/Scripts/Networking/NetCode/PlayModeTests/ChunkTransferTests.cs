@@ -41,7 +41,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             packet = ChunkTransferFrames.EncodeInterest(new ChunkInterest(4, Address, 2, 1));
             var interest = ChunkTransferFrames.DecodeInterest(packet);
             Assert.That(interest.Epoch, Is.EqualTo(4)); Assert.That(interest.Anchor, Is.EqualTo(Address));
-            Assert.That(interest.Count, Is.EqualTo(75));
+            Assert.That(interest.Count, Is.EqualTo(ChunkInterest.CountFor(2, 1)));
             Assert.That(ChunkTransferFrames.DecodeResync(ChunkTransferFrames.EncodeResync(91)), Is.EqualTo(91));
             Assert.That(ChunkTransferFrames.DecodeInterestRequest(ChunkTransferFrames.EncodeInterestRequest(Address)), Is.EqualTo(Address));
         }

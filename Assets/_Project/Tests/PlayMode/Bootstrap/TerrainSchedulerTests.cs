@@ -78,14 +78,17 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             using var renderer = new TerrainRenderer(content, settings);
             using var scheduler = new ChunkMeshScheduler(content, settings, renderer);
             var anchor = new ChunkAddress(1, int3.zero);
-            var interest = new ChunkInterest(1, anchor, 1, 0);
+            //radius 2 so the empty chunks flanking the camera are resident: the graph walks face
+            //neighbours, and a radius-1 cylinder has no column diagonally adjacent to the camera's.
+            var interest = new ChunkInterest(1, anchor, 2, 0);
             uint stone = content.Registry.LookupSolid("digblocks:stone");
 
             store.SetReplicaInterest(interest);
             foreach (var address in interest.Addresses())
             {
                 var cells = new uint[ChunkLayout.Volume];
-                if (address.Position.x == 0) System.Array.Fill(cells, stone);
+                //a three-wide wall at x = 0, exactly what the camera's flood fill can reach around.
+                if (address.Position.x == 0 && math.abs(address.Position.z) <= 1) System.Array.Fill(cells, stone);
                 else if (address.Position.Equals(new int3(1, 0, 0))) cells[ChunkLayout.Index(new int3(16, 16, 16))] = stone;
                 store.PublishReplica(interest.Epoch, new ChunkImage(address, 1, 1, cells, new uint[ChunkLayout.Volume]));
             }

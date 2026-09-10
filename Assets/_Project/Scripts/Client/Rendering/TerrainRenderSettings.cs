@@ -12,7 +12,7 @@ namespace DigBlocks.Client.Rendering
         public MaterialBinding[] Materials;
         public TintBinding[] Tints;
         [Range(1, 8)] public int MeshWorkers = 2;
-        [Range(16, 4096)] public int MaxChunks = 256;
+        [Range(16, 32768)] public int MaxChunks = 256;
         [Min(393216)] public int QuadCapacity = 1048576;
         [Min(2359296)] public int UploadBytesPerFrame = 4 * 1024 * 1024;
         [Range(1, 8)] public int UploadSlots = 2;

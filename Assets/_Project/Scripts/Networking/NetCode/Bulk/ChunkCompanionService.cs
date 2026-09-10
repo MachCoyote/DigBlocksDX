@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using DigBlocks.ChunkProtocol;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Session;
 using DigBlocks.Voxels;
@@ -38,6 +39,14 @@ namespace DigBlocks.Networking.NetCode
             if (bulkPort.HasValue && session.Role != NetworkSessionRole.Server) throw new ArgumentException("Only a remote server chooses a bulk port.", nameof(bulkPort));
             this.bulkPort = bulkPort; this.registry = registry ?? BlockRegistry.CreateDummy(); bindingTimeout = bindingTimeoutSeconds; maxPending = maxPendingBindings;
         }
+        //residency follows the authored interest rather than a fixed number, with headroom so peers at
+        //different anchors, and the moment an anchor moves, do not exhaust the store.
+        internal static int Residency(ChunkStreamingOptions options)
+        {
+            long chunks = ChunkInterest.CountFor(options.HorizontalRadius, options.VerticalRadius);
+            return (int)Math.Clamp(chunks + chunks / 2 + 16, 1, 65536);
+        }
+
         public bool ClientDataReady => clientEndpoint?.DataReady ?? false;
         public long SentChunkBytes => serverEndpoint?.SentChunkBytes ?? 0;
         public long AppliedChunkAcknowledgements => serverEndpoint?.AppliedChunkAcknowledgements ?? 0;
@@ -85,7 +94,7 @@ namespace DigBlocks.Networking.NetCode
                     var world = session.ServerWorld;
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Server world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
-                    owner.Configure(registry, maxSnapshots: streamingOptions.SnapshotWorkers); serverStore = owner;
+                    owner.Configure(registry, Residency(streamingOptions), streamingOptions.SnapshotWorkers); serverStore = owner;
                     ushort port = 0;
                     if (!ipc)
                     {
@@ -104,7 +113,7 @@ namespace DigBlocks.Networking.NetCode
                     var world = session.ClientWorld;
                     if (world is not { IsCreated: true }) throw new InvalidOperationException("Client world is not available.");
                     var owner = world.GetOrCreateSystemManaged<ChunkWorldSystem>();
-                    owner.Configure(registry, maxSnapshots: streamingOptions.SnapshotWorkers).EnableReplicas(); clientStore = owner;
+                    owner.Configure(registry, Residency(streamingOptions), streamingOptions.SnapshotWorkers).EnableReplicas(); clientStore = owner;
                     clientSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (clientSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
                     clientEndpoint = new BulkCompanionEndpoint(world, false, ipc, 0, registry, bindingTimeout, maxPending, streamingOptions);

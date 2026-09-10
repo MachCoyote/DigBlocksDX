@@ -20,8 +20,7 @@ namespace DigBlocks.Bootstrap.Tests
             var options = settings.CreateOptions();
             Assert.That(options.HorizontalRadius, Is.GreaterThanOrEqualTo(0));
             Assert.That(options.VerticalRadius, Is.GreaterThanOrEqualTo(0));
-            long width = 2L * options.HorizontalRadius + 1;
-            long count = width * width * (2L * options.VerticalRadius + 1);
+            long count = ChunkInterest.CountFor(options.HorizontalRadius, options.VerticalRadius);
             //CreateOptions builds the interest itself, so reaching here already proves it is constructible.
             Assert.That(count, Is.LessThanOrEqualTo(ChunkInterest.MaximumChunks),
                 "Authored render distances must fit the admitted residency and the renderer's chunk slots.");

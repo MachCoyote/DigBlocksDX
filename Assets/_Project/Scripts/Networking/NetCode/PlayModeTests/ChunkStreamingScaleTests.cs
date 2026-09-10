@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using DigBlocks.ChunkProtocol;
 using DigBlocks.Client.Runtime;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Server.Runtime;
@@ -24,6 +25,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         {
             var hosts = new List<GameHost>(); var logger = new NullLogger();
             var options = new ChunkStreamingOptions(progressTimeout: 30);
+            int resident = (int)ChunkInterest.CountFor(options.HorizontalRadius, options.VerticalRadius);
             if (impaired) options.Simulation = new SimulatorUtility.Parameters
             {
                 MaxPacketCount = 256, MaxPacketSize = 1400, Mode = ApplyMode.SentPacketsOnly,
@@ -53,9 +55,9 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                     await Host(clientRuntime, clientSession, clients[i]).StartAsync(CancellationToken.None);
                     replicas[i] = clientSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
                 }
-                await Until(() => { foreach (var client in clients) if (!client.ClientDataReady) return false; return server.AppliedChunkAcknowledgements >= peerCount * 9; });
+                await Until(() => { foreach (var client in clients) if (!client.ClientDataReady) return false; return server.AppliedChunkAcknowledgements >= peerCount * resident; });
                 var source = session.ServerWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
-                Assert.That(source.Count, Is.EqualTo(9), "Overlapping peers share authoritative residents.");
+                Assert.That(source.Count, Is.EqualTo(resident), "Overlapping peers share authoritative residents.");
                 using var lease = source.Acquire(new ChunkAddress(1, default));
                 var edits = new CellEdit[ChunkLayout.Volume];
                 for (int i = 0; i < edits.Length; i++) edits[i] = new CellEdit(i, (uint)(i % 3 == 0 ? 1 : 0), (uint)(i % 3 == 1 ? 1 : 0));

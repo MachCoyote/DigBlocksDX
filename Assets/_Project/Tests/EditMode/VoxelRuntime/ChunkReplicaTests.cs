@@ -79,7 +79,12 @@ namespace DigBlocks.Voxels.Runtime.Tests
             var second = new ChunkInterest(2, new ChunkAddress(1, new int3(1, 0, 0)), 1, 0);
             Assert.That(store.SetReplicaInterest(second), Is.True);
 
-            Assert.That(store.Count, Is.EqualTo(6));
+            //exactly the chunks both interests claim survive, derived rather than pinned so the
+            //assertion stays honest if the interest shape changes again.
+            int overlap = 0;
+            foreach (var address in first.Addresses()) if (second.Contains(address)) overlap++;
+            Assert.That(overlap, Is.GreaterThan(1), "the fixture must actually overlap to be meaningful.");
+            Assert.That(store.Count, Is.EqualTo(overlap));
             Assert.That(store.TryGetReplicaStamp(retainedAddress, out var after), Is.True);
             Assert.That(after.Incarnation, Is.EqualTo(retained.Incarnation));
             Assert.That(world.EntityManager.Exists(entity), Is.True);

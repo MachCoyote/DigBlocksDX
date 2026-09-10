@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using DigBlocks.Bootstrap.Diagnostics;
+using DigBlocks.ChunkProtocol;
 using DigBlocks.Client.Flow;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Session;
@@ -238,8 +239,7 @@ namespace DigBlocks.Bootstrap.PlayModeTests
         {
             var settings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
             var options = settings != null ? settings.CreateOptions() : new ChunkStreamingOptions();
-            int width = 2 * options.HorizontalRadius + 1;
-            return width * width * (2 * options.VerticalRadius + 1);
+            return (int)ChunkInterest.CountFor(options.HorizontalRadius, options.VerticalRadius);
         }
 
     }

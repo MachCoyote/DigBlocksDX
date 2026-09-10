@@ -101,7 +101,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(clientPackets.Count, Is.EqualTo(1));
             Assert.That(ChunkTransferFrames.ReadKind(clientPackets[0]), Is.EqualTo(ChunkFrameKind.InterestRequest));
             server.Receive(1, clientPackets[0], 0);
-            Assert.That(store.Count, Is.EqualTo(9));
+            Assert.That(store.Count, Is.EqualTo(ChunkInterest.CountFor(options.HorizontalRadius, options.VerticalRadius)));
             server.Tick(0);
             var declaration = ChunkTransferFrames.DecodeInterest(serverPackets.Find(packet => ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Interest));
             Assert.That(declaration.Anchor, Is.EqualTo(requested));
@@ -113,7 +113,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         }
 
         [UnityTest]
-        public IEnumerator MovingOneChunkRetainsSixReplicasAndStreamsOnlyThreeNewSnapshots()
+        public IEnumerator MovingOneChunkRetainsOverlappingReplicasAndStreamsOnlyTheNewOnes()
         {
             using var serverWorld = new World("Moving source");
             using var clientWorld = new World("Moving replica");
@@ -122,6 +122,13 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry); replica.EnableReplicas();
             var inbound = new Queue<byte[]>(); var replies = new Queue<byte[]>(); var starts = new List<ChunkAddress>();
             var options = new ChunkStreamingOptions(1, 0);
+            //derived from the interest shape rather than pinned, so the counts stay true if it changes.
+            var movedAnchor = new ChunkAddress(1, new int3(1, 0, 0));
+            var before = new ChunkInterest(1, Address, options.HorizontalRadius, options.VerticalRadius);
+            var after1 = new ChunkInterest(2, movedAnchor, options.HorizontalRadius, options.VerticalRadius);
+            int resident = before.Count, arrived = 0;
+            foreach (var address in after1.Addresses()) if (!before.Contains(address)) arrived++;
+            Assert.That(arrived, Is.GreaterThan(0).And.LessThan(resident), "the move must both retain and add chunks.");
             using var server = new ChunkStreamingServer(store, options, (_, packet) =>
             {
                 if (ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Start) starts.Add(ChunkTransferFrames.DecodeStart(packet).Address);
@@ -129,7 +136,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             }, _ => Assert.Fail());
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail(), 0);
             Assert.That(server.Add(1, 0), Is.True);
-            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < 9; tick++)
+            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < resident; tick++)
             {
                 server.Tick(tick * 0.01);
                 while (inbound.Count != 0) client.Receive(inbound.Dequeue(), tick * 0.01);
@@ -137,16 +144,16 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 while (replies.Count != 0) server.Receive(1, replies.Dequeue(), tick * 0.01);
                 yield return null;
             }
-            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(9));
+            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(resident));
             AssertRadial(starts, Address, options.PeerWindow);
             var retainedAddress = new ChunkAddress(1, new int3(0, 0, 0));
             Assert.That(replica.TryGetReplicaStamp(retainedAddress, out var retained), Is.True);
 
             starts.Clear();
-            Assert.That(client.RequestInterest(new ChunkAddress(1, new int3(1, 0, 0))), Is.True);
+            Assert.That(client.RequestInterest(movedAnchor), Is.True);
             client.Tick(6);
             while (replies.Count != 0) server.Receive(1, replies.Dequeue(), 6);
-            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < 12; tick++)
+            for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < resident + arrived; tick++)
             {
                 double now = 6 + tick * 0.01;
                 server.Tick(now);
@@ -156,15 +163,15 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 yield return null;
             }
 
-            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(12));
-            Assert.That(server.SentSnapshots, Is.EqualTo(12));
-            Assert.That(store.Count, Is.EqualTo(9)); Assert.That(replica.Count, Is.EqualTo(9));
+            Assert.That(server.AppliedAcknowledgements, Is.EqualTo(resident + arrived));
+            Assert.That(server.SentSnapshots, Is.EqualTo(resident + arrived));
+            Assert.That(store.Count, Is.EqualTo(resident)); Assert.That(replica.Count, Is.EqualTo(resident));
             Assert.That(replica.DataReady, Is.True);
             Assert.That(replica.TryGetReplicaStamp(retainedAddress, out var after), Is.True);
             Assert.That(after.Incarnation, Is.EqualTo(retained.Incarnation));
             Assert.That(replica.TryGetReplicaStamp(new ChunkAddress(1, new int3(-1, 0, 0)), out _), Is.False);
-            Assert.That(starts.Count, Is.EqualTo(3));
-            AssertRadial(starts, new ChunkAddress(1, new int3(1, 0, 0)), options.PeerWindow);
+            Assert.That(starts.Count, Is.EqualTo(arrived));
+            AssertRadial(starts, movedAnchor, options.PeerWindow);
         }
 
         //Selection is still strictly closest-first, but transfers are pipelined, so the window's chunks are

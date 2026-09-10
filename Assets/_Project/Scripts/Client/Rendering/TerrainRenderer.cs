@@ -190,7 +190,7 @@ namespace DigBlocks.Client.Rendering
                 !(SystemInfo.supportsGraphicsFence && SystemInfo.supportsAsyncCompute) && !SystemInfo.supportsAsyncGPUReadback)
                 throw new NotSupportedException("Terrain requires compute, indirect instancing, texture arrays and GPU completion tokens.");
             if (content.Materials.Count < 1 || content.Materials.Count > 8) throw new NotSupportedException("Terrain supports up to eight material batches within the initial buffer budget.");
-            if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 || settings.MaxChunks < 1 || settings.MaxChunks > 4096 ||
+            if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 || settings.MaxChunks < 1 || settings.MaxChunks > 32768 ||
                 settings.QuadCapacity < 2 * GreedyMesherJob.MaximumQuads || settings.QuadCapacity > 16 * 1024 * 1024 ||
                 settings.UploadBytesPerFrame < GreedyMesherJob.MaximumQuads * PackedQuad.Stride ||
                 settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 1 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
