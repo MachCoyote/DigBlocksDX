@@ -94,12 +94,55 @@ namespace DigBlocks.Voxels.Generation
         }
     }
 
-    /// <summary>Holds the one Burst compilation of the column fill kernel.</summary>
+    /// <summary>What a layer's sea needs to know to fill the open space below it.</summary>
+    public unsafe struct SeaFillData
+    {
+        public int ChunkMinY, LayerBottom, LayerTop, SeaLevel;
+        public uint Fluid;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void SeaFill(SeaFillData* sea, uint* solids, uint* fluids);
+
+    /// <summary>
+    /// Fills the layer's fluid into whatever solid did not claim, up to its sea level.
+    /// <para>
+    /// This floods every open cell below the line, which is right while a layer has no caves. Once a
+    /// density stage starts carving, a sealed cavern a hundred blocks down would flood too, and that
+    /// is what <see cref="AquiferStage"/> exists to answer.
+    /// </para>
+    /// </summary>
+    [BurstCompile]
+    public static unsafe class SeaFillKernel
+    {
+        [BurstCompile(FloatMode = FloatMode.Strict, FloatPrecision = FloatPrecision.High)]
+        [AOT.MonoPInvokeCallback(typeof(SeaFill))]
+        public static void Fill(SeaFillData* sea, uint* solids, uint* fluids)
+        {
+            int top = sea->SeaLevel < sea->LayerTop ? sea->SeaLevel : sea->LayerTop;
+            for (int localY = 0; localY < ColumnFillKernel.Edge; localY++)
+            {
+                int worldY = sea->ChunkMinY + localY;
+                if (worldY < sea->LayerBottom || worldY > top) continue;
+
+                long offset = (long)localY * ColumnFillKernel.Columns;
+                uint* solidSlice = solids + offset;
+                uint* fluidSlice = fluids + offset;
+                for (int column = 0; column < ColumnFillKernel.Columns; column++)
+                    if (solidSlice[column] == 0u) fluidSlice[column] = sea->Fluid;
+            }
+        }
+    }
+
+    /// <summary>Holds the one Burst compilation of each fill kernel.</summary>
     public static unsafe class ColumnFillDispatch
     {
-        private static readonly BurstEntryPoint<ColumnFill> Entry = new BurstEntryPoint<ColumnFill>(ColumnFillKernel.Fill);
+        private static readonly BurstEntryPoint<ColumnFill> ColumnEntry = new BurstEntryPoint<ColumnFill>(ColumnFillKernel.Fill);
+        private static readonly BurstEntryPoint<SeaFill> SeaEntry = new BurstEntryPoint<SeaFill>(SeaFillKernel.Fill);
 
-        public static FunctionPointer<ColumnFill> Compiled => Entry.Compiled;
-        public static void Warm() => Entry.Warm();
+        public static FunctionPointer<ColumnFill> Compiled => ColumnEntry.Compiled;
+        public static FunctionPointer<SeaFill> CompiledSea => SeaEntry.Compiled;
+
+        public static void Warm() { ColumnEntry.Warm(); SeaEntry.Warm(); }
     }
 }

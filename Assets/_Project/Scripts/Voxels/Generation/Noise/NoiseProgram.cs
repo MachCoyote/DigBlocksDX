@@ -34,6 +34,12 @@ namespace DigBlocks.Voxels.Generation
             ResultSlot = compiled.ResultSlot;
             UsesY = compiled.UsesY;
 
+            //externals are resolved before anything is allocated, because an unregistered id is the one
+            //failure this constructor can hit and native memory taken before it would simply leak.
+            var resolved = new IntPtr[externalCount];
+            for (int index = 0; index < externalCount; index++)
+                resolved[index] = NoiseExternalRegistry.Resolve(compiled.Externals[index]).Value;
+
             //a zero-length native array has no address to hand the kernel, and the kernel reads none of
             //these when the matching count is zero, so one spare element keeps the pointers valid.
             ops = new NativeArray<NoiseOp>(math.max(1, opCount), Allocator.Persistent);
@@ -42,8 +48,7 @@ namespace DigBlocks.Voxels.Generation
 
             NativeArray<NoiseOp>.Copy(compiled.Ops, ops, opCount);
             if (knotCount > 0) NativeArray<SplineKnot>.Copy(compiled.Knots, knots, knotCount);
-            for (int index = 0; index < externalCount; index++)
-                externals[index] = NoiseExternalRegistry.Resolve(compiled.Externals[index]).Value;
+            for (int index = 0; index < externalCount; index++) externals[index] = resolved[index];
         }
 
         /// <summary>Compiles an authored field against a world seed. The expression is not retained.</summary>
