@@ -1,0 +1,7 @@
+{
+  "name": "DigBlocks.Voxels.Generation",
+  "rootNamespace": "DigBlocks.Voxels.Generation",
+  "references": ["DigBlocks.Voxels", "Unity.Collections", "Unity.Mathematics", "Unity.Burst"],
+  "allowUnsafeCode": true,
+  "noEngineReferences": false
+}
