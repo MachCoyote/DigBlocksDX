@@ -105,11 +105,25 @@ namespace DigBlocks.Voxels.Runtime
                 destination.Add(new ResidentChunk { Address = pair.Key, Incarnation = pair.Value.Data.Incarnation, Revision = pair.Value.Data.Revision });
         }
 
-        public JobHandle ScheduleReplicaSolidCopy(ChunkAddress address, NativeArray<uint> destination, JobHandle dependency = default)
+        /// <summary>
+        /// Hands out a job-safe read of the replica's packed solids and folds its outstanding writers
+        /// into <paramref name="dependency"/>. The caller registers the job it schedules through
+        /// <see cref="RegisterReplicaReader"/>. Meshing reads the stored layout directly rather than
+        /// expanding seven whole chunks to reach one chunk and six boundary planes.
+        /// </summary>
+        public bool TryGetReplicaSolidView(ChunkAddress address, out PaletteChannel.ReadView view, ref JobHandle dependency)
+        {
+            RequireAlive(); view = default;
+            if (!replicas || !chunks.TryGetValue(address, out var entry)) return false;
+            view = entry.Data.SolidView();
+            dependency = JobHandle.CombineDependencies(dependency, entry.Data.Readers);
+            return true;
+        }
+
+        public void RegisterReplicaReader(ChunkAddress address, JobHandle reader)
         {
             RequireAlive();
-            if (!replicas || !chunks.TryGetValue(address, out var entry)) throw new InvalidOperationException("Replica is no longer resident.");
-            return entry.Data.ScheduleSolidCopy(destination, dependency);
+            if (replicas && chunks.TryGetValue(address, out var entry)) entry.Data.AddReader(reader);
         }
         /// <summary>
         /// Encodes the leased chunk in the layout it is already stored in. This used to hand a 256 KiB

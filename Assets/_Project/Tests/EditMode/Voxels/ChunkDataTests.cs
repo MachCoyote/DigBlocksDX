@@ -1,25 +1,44 @@
 using System;
 using NUnit.Framework;
+using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace DigBlocks.Voxels.Tests
 {
     public class ChunkDataTests
     {
+        //Meshing reads the stored channel in place rather than copying it out first, so the contract
+        //that matters is that a mutation waits for outstanding readers before it can move the memory
+        //those readers are pointing at, and that disposal does the same.
         [Test]
-        public void ReusableSolidCopySurvivesMutationAndOwnerDisposal()
+        public void RegisteredReadersFenceMutationAndOwnerDisposal()
         {
             using var before = new Unity.Collections.NativeArray<uint>(ChunkLayout.Volume, Unity.Collections.Allocator.Persistent);
             using var after = new Unity.Collections.NativeArray<uint>(ChunkLayout.Volume, Unity.Collections.Allocator.Persistent);
             using var chunk = new ChunkData(default, 1, 2, 0);
-            var first = chunk.ScheduleSolidCopy(before);
+
+            var first = new ReadJob { Source = chunk.SolidView(), Destination = before }
+                .Schedule(ChunkLayout.Volume, 256, chunk.Readers);
+            chunk.AddReader(first);
+            //widening the palette reallocates the channel, so this must not proceed until the read is done.
             chunk.Apply(new[] { new CellEdit(7, 3, 0) }, 3, 0);
-            var second = chunk.ScheduleSolidCopy(after);
+            Assert.That(first.IsCompleted, Is.True, "Mutation must fence the readers it invalidates.");
+
+            var second = new ReadJob { Source = chunk.SolidView(), Destination = after }
+                .Schedule(ChunkLayout.Volume, 256, chunk.Readers);
+            chunk.AddReader(second);
             chunk.Dispose();
-            first.Complete(); second.Complete();
             Assert.That(before[7], Is.EqualTo(2));
             Assert.That(after[7], Is.EqualTo(3));
             Assert.That(after[8], Is.EqualTo(2));
+        }
+
+        [Unity.Burst.BurstCompile]
+        private struct ReadJob : Unity.Jobs.IJobParallelFor
+        {
+            [Unity.Collections.ReadOnly] public PaletteChannel.ReadView Source;
+            [Unity.Collections.WriteOnly] public Unity.Collections.NativeArray<uint> Destination;
+            public void Execute(int index) => Destination[index] = Source.Get(index);
         }
 
         [Test]

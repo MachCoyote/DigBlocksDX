@@ -25,7 +25,7 @@ namespace DigBlocks.Client.Rendering
         }
         private sealed class Worker : IDisposable
         {
-            public readonly NativeArray<uint>[] Sources = new NativeArray<uint>[7];
+            public readonly PaletteChannel.ReadView[] Views = new PaletteChannel.ReadView[7];
             public readonly ResidentChunk[] Stamps = new ResidentChunk[7];
             public readonly NativeArray<uint> Padded = new(GreedyMesherJob.PaddedVolume, Allocator.Persistent);
             public readonly NativeArray<ulong> Mask = new(1024, Allocator.Persistent);
@@ -38,16 +38,17 @@ namespace DigBlocks.Client.Rendering
             public ResidentChunkStore Store;
             public ulong Epoch, Version;
             public int Present;
-            public Worker() { for (int i = 0; i < Sources.Length; i++) Sources[i] = new NativeArray<uint>(ChunkLayout.Volume, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); }
             public void Dispose()
             {
                 Handle.Complete();
-                foreach (var source in Sources) source.Dispose();
                 Padded.Dispose(); Mask.Dispose(); VisibilityVisited.Dispose(); VisibilityQueue.Dispose(); Visibility.Dispose(); Output.Dispose();
             }
         }
 
         private readonly Worker[] workers;
+        //an absent neighbour is padded as air, and a channel holding nothing but air is exactly that,
+        //so the job always gets a real view rather than an uncreated one to guard against.
+        private PaletteChannel air = new PaletteChannel(0);
         private readonly Dictionary<ChunkAddress, Entry> entries = new();
         private readonly Stack<uint> freeSlots = new();
         private readonly List<ResidentChunk> initial = new();
@@ -132,18 +133,23 @@ namespace DigBlocks.Client.Rendering
         {
             worker.Present = 0; worker.Handle = default;
             worker.Store = store; worker.Epoch = store.InterestEpoch; worker.Version = entry.Dirty;
+            var emptyView = air.AsReadOnly();
             for (int i = 0; i < 7; i++)
             {
+                worker.Views[i] = emptyView;
                 var address = Neighbor(entry.Address, i);
                 if (!store.TryGetReplicaStamp(address, out worker.Stamps[i])) continue;
+                if (!store.TryGetReplicaSolidView(address, out worker.Views[i], ref worker.Handle)) { worker.Views[i] = emptyView; continue; }
                 worker.Present |= 1 << i;
-                worker.Handle = JobHandle.CombineDependencies(worker.Handle, store.ScheduleReplicaSolidCopy(address, worker.Sources[i]));
             }
             var padding = new PaddingJob
             {
-                Center = worker.Sources[0], Down = worker.Sources[1], Up = worker.Sources[2], North = worker.Sources[3],
-                South = worker.Sources[4], West = worker.Sources[5], East = worker.Sources[6], Present = worker.Present, Output = worker.Padded
+                Center = worker.Views[0], Down = worker.Views[1], Up = worker.Views[2], North = worker.Views[3],
+                South = worker.Views[4], West = worker.Views[5], East = worker.Views[6], Present = worker.Present, Output = worker.Padded
             }.Schedule(GreedyMesherJob.PaddedVolume, 256, worker.Handle);
+            //every source has to fence the padding job, or a chunk could be replaced while it reads.
+            for (int i = 0; i < 7; i++)
+                if ((worker.Present & (1 << i)) != 0) store.RegisterReplicaReader(Neighbor(entry.Address, i), padding);
             var mesh = new GreedyMesherJob
             {
                 Voxels = worker.Padded, Mask = worker.Mask, Output = worker.Output, Appearance = appearance.AsReadOnly(),
@@ -222,13 +228,14 @@ namespace DigBlocks.Client.Rendering
         {
             if (store != null) { store.ReplicaChanged -= OnChanged; store.ReplicaRemoved -= OnRemoved; store.ReplicasReset -= OnReset; }
             foreach (var worker in workers) worker.Dispose();
+            air.Dispose();
             appearance.Dispose(); attributes.Dispose(); entries.Clear();
         }
 
         [BurstCompile]
         private struct PaddingJob : IJobParallelFor
         {
-            [ReadOnly] public NativeArray<uint> Center, Down, Up, North, South, West, East;
+            [ReadOnly] public PaletteChannel.ReadView Center, Down, Up, North, South, West, East;
             public int Present;
             [WriteOnly] public NativeArray<uint> Output;
             public void Execute(int index)
@@ -241,13 +248,13 @@ namespace DigBlocks.Client.Rendering
                 int cell = (x & 31) + 32 * ((z & 31) + 32 * (y & 31));
                 switch (source)
                 {
-                    case 0: Output[index] = Center[cell]; break;
-                    case 1: Output[index] = Down[cell]; break;
-                    case 2: Output[index] = Up[cell]; break;
-                    case 3: Output[index] = North[cell]; break;
-                    case 4: Output[index] = South[cell]; break;
-                    case 5: Output[index] = West[cell]; break;
-                    default: Output[index] = East[cell]; break;
+                    case 0: Output[index] = Center.Get(cell); break;
+                    case 1: Output[index] = Down.Get(cell); break;
+                    case 2: Output[index] = Up.Get(cell); break;
+                    case 3: Output[index] = North.Get(cell); break;
+                    case 4: Output[index] = South.Get(cell); break;
+                    case 5: Output[index] = West.Get(cell); break;
+                    default: Output[index] = East.Get(cell); break;
                 }
             }
         }

@@ -3,6 +3,7 @@
   "references": [
     "DigBlocks.Voxels",
     "Unity.Collections",
+    "Unity.Jobs",
     "Unity.Mathematics",
     "Unity.Burst"
   ],

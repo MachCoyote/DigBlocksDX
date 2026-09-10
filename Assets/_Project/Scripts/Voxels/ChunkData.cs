@@ -168,23 +168,18 @@ namespace DigBlocks.Voxels
             return capture;
         }
 
-        //detaches solid data into caller-owned reusable memory; later mutation waits only for this copy.
-        public JobHandle ScheduleSolidCopy(NativeArray<uint> destination, JobHandle dependency = default)
+        /// <summary>
+        /// A job-safe read of the packed solids. The caller must depend on <see cref="Readers"/> and
+        /// hand the scheduled job back through <see cref="AddReader"/>, so a later mutation fences it.
+        /// </summary>
+        public PaletteChannel.ReadView SolidView() { RequireAlive(); return solids.AsReadOnly(); }
+
+        public JobHandle Readers { get { RequireAlive(); return readers; } }
+
+        public void AddReader(JobHandle reader)
         {
             RequireAlive();
-            if (!destination.IsCreated || destination.Length != ChunkLayout.Volume) throw new ArgumentException("Expected a full chunk destination.", nameof(destination));
-            var handle = new SolidCopyJob { Source = solids.AsReadOnly(), Destination = destination }
-                .Schedule(ChunkLayout.Volume, 256, JobHandle.CombineDependencies(readers, dependency));
-            readers = handle;
-            return handle;
-        }
-
-        [BurstCompile]
-        private struct SolidCopyJob : IJobParallelFor
-        {
-            [ReadOnly] public PaletteChannel.ReadView Source;
-            [WriteOnly] public NativeArray<uint> Destination;
-            public void Execute(int index) => Destination[index] = Source.Get(index);
+            readers = JobHandle.CombineDependencies(readers, reader);
         }
 
         public void Dispose()

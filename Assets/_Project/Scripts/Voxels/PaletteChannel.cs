@@ -22,6 +22,11 @@ namespace DigBlocks.Voxels
         //mask. A word's leftover high bits are padding and are always zero.
         private NativeList<ulong> words;
         private NativeParallelHashMap<uint, int> lookup;
+        //AsArray hands out a view onto the list's current buffer, and taking one again invalidates the
+        //last. Meshing gives several parallel jobs a view of the same chunk at once, so the view is
+        //taken once per structural change and handed out from here instead.
+        private NativeArray<uint> paletteCells;
+        private NativeArray<ulong> wordCells;
         public ChannelStorage Storage { get; private set; }
         public int BitsPerEntry { get; private set; }
 
@@ -29,10 +34,15 @@ namespace DigBlocks.Voxels
         {
             palette = new NativeList<uint>(1, Allocator.Persistent);
             palette.Add(initial);
-            words = new NativeList<ulong>(0, Allocator.Persistent);
+            //a uniform channel has no cells, but AsArray on an empty list hands out a null-backed
+            //NativeArray, and a job cannot be given one of those even if it never reads it.
+            words = new NativeList<ulong>(1, Allocator.Persistent);
+            words.Resize(1, NativeArrayOptions.ClearMemory);
             lookup = default;
             Storage = ChannelStorage.Uniform;
             BitsPerEntry = 0;
+            paletteCells = default; wordCells = default;
+            Refresh();
         }
 
         //one packing implementation serves storage, the wire and worldgen; this is the storage end of it.
@@ -43,12 +53,19 @@ namespace DigBlocks.Voxels
             return FromPacked(scratch);
         }
 
+        //re-derives the views the readers share. Anything that can move either buffer must call this.
+        private void Refresh()
+        {
+            paletteCells = palette.AsArray();
+            wordCells = words.AsArray();
+        }
+
         public uint Get(int index)
         {
             CheckIndex(index);
-            if (Storage == ChannelStorage.Uniform) return palette[0];
-            uint raw = Read(words.AsArray(), index, BitsPerEntry);
-            return Storage == ChannelStorage.Direct ? raw : palette[(int)raw];
+            if (Storage == ChannelStorage.Uniform) return paletteCells[0];
+            uint raw = Read(wordCells, index, BitsPerEntry);
+            return Storage == ChannelStorage.Direct ? raw : paletteCells[(int)raw];
         }
 
         public void Set(int index, uint value)
@@ -59,27 +76,32 @@ namespace DigBlocks.Voxels
             {
                 lookup = new NativeParallelHashMap<uint, int>(16, Allocator.Persistent);
                 lookup.Add(palette[0], 0);
-                words.Resize(WordCount(1), NativeArrayOptions.ClearMemory);
+                words.Resize(WordCount(1), NativeArrayOptions.UninitializedMemory);
+                var cleared = words.AsArray();
+                for (int i = 0; i < cleared.Length; i++) cleared[i] = 0;
                 Storage = ChannelStorage.Indirect;
                 BitsPerEntry = 1;
+                Refresh();
             }
-            if (Storage == ChannelStorage.Direct) { Write(words.AsArray(), index, value, DirectBits); return; }
+            if (Storage == ChannelStorage.Direct) { Write(wordCells, index, value, DirectBits); return; }
             if (!lookup.TryGetValue(value, out int entry))
             {
                 if (palette.Length == MaxPaletteEntries)
                 {
                     PromoteDirect();
-                    Write(words.AsArray(), index, value, DirectBits);
+                    Write(wordCells, index, value, DirectBits);
                     return;
                 }
                 entry = palette.Length;
                 //widen before adding, so the entry the palette is about to hand out has room to be written.
                 if (entry >= 1 << BitsPerEntry) Widen(BitsPerEntry + 1);
+                //growing the palette can move it, so the shared view has to be taken again.
                 palette.Add(value);
+                Refresh();
                 if (lookup.Count() == lookup.Capacity) lookup.Capacity *= 2;
                 lookup.Add(value, entry);
             }
-            Write(words.AsArray(), index, (uint)entry, BitsPerEntry);
+            Write(wordCells, index, (uint)entry, BitsPerEntry);
         }
 
         /// <summary>Copies the channel out in the layout it already holds: a palette copy and a word copy.</summary>
@@ -88,9 +110,11 @@ namespace DigBlocks.Voxels
             if (destination == null) throw new ArgumentNullException(nameof(destination));
             destination.Storage = Storage;
             destination.BitsPerEntry = BitsPerEntry;
-            destination.PaletteCount = palette.Length;
-            if (palette.Length != 0) NativeArray<uint>.Copy(palette.AsArray(), destination.Palette, palette.Length);
-            if (words.Length != 0) NativeArray<ulong>.Copy(words.AsArray(), destination.Words, words.Length);
+            destination.PaletteCount = Storage == ChannelStorage.Direct ? 0 : palette.Length;
+            if (destination.PaletteCount != 0)
+                NativeArray<uint>.Copy(paletteCells, destination.Palette, destination.PaletteCount);
+            int wordCount = destination.WordCount;
+            if (wordCount != 0) NativeArray<ulong>.Copy(wordCells, destination.Words, wordCount);
         }
 
         /// <summary>Adopts an already packed channel. The caller must have validated it.</summary>
@@ -100,15 +124,15 @@ namespace DigBlocks.Voxels
             var channel = default(PaletteChannel);
             channel.Storage = source.Storage;
             channel.BitsPerEntry = source.BitsPerEntry;
+            //never empty, for the same reason the constructor is not: an empty list is a null array.
             channel.palette = new NativeList<uint>(Math.Max(1, source.PaletteCount), Allocator.Persistent);
             for (int i = 0; i < source.PaletteCount; i++) channel.palette.Add(source.Palette[i]);
-            int wordCount = source.WordCount;
+            if (channel.palette.Length == 0) channel.palette.Add(0);
+            int wordCount = Math.Max(1, source.WordCount);
             channel.words = new NativeList<ulong>(wordCount, Allocator.Persistent);
-            if (wordCount != 0)
-            {
-                channel.words.ResizeUninitialized(wordCount);
-                NativeArray<ulong>.Copy(source.Words, 0, channel.words.AsArray(), 0, wordCount);
-            }
+            channel.words.Resize(wordCount, NativeArrayOptions.ClearMemory);
+            if (source.WordCount != 0)
+                NativeArray<ulong>.Copy(source.Words, 0, channel.words.AsArray(), 0, source.WordCount);
             //Uniform and Direct both index nothing, so neither needs the reverse map.
             if (source.Storage != ChannelStorage.Indirect) channel.lookup = default;
             else
@@ -116,12 +140,13 @@ namespace DigBlocks.Voxels
                 channel.lookup = new NativeParallelHashMap<uint, int>(Math.Max(16, source.PaletteCount), Allocator.Persistent);
                 for (int i = 0; i < source.PaletteCount; i++) channel.lookup.TryAdd(source.Palette[i], i);
             }
+            channel.Refresh();
             return channel;
         }
 
         public ReadView AsReadOnly() => new ReadView
         {
-            Palette = palette.AsArray().AsReadOnly(), Words = words.AsArray().AsReadOnly(),
+            Palette = paletteCells.AsReadOnly(), Words = wordCells.AsReadOnly(),
             Storage = Storage, BitsPerEntry = BitsPerEntry
         };
 
@@ -166,12 +191,13 @@ namespace DigBlocks.Voxels
         private void Widen(int bits)
         {
             var cells = scratchCells ??= new uint[ChunkLayout.Volume];
-            var source = words.AsArray();
+            var source = wordCells;
             for (int i = 0; i < ChunkLayout.Volume; i++) cells[i] = Read(source, i, BitsPerEntry);
             //Resize only clears what it adds, and a wider entry can leave a word with padding bits
             //where the narrower layout kept data, so every word is zeroed before it is refilled.
             words.Resize(WordCount(bits), NativeArrayOptions.UninitializedMemory);
-            var destination = words.AsArray();
+            Refresh();
+            var destination = wordCells;
             for (int i = 0; i < destination.Length; i++) destination[i] = 0;
             BitsPerEntry = bits;
             for (int i = 0; i < ChunkLayout.Volume; i++) Write(destination, i, cells[i], bits);
@@ -180,15 +206,16 @@ namespace DigBlocks.Voxels
         private void PromoteDirect()
         {
             var cells = scratchCells ??= new uint[ChunkLayout.Volume];
-            var source = words.AsArray();
-            for (int i = 0; i < ChunkLayout.Volume; i++) cells[i] = palette[(int)Read(source, i, BitsPerEntry)];
+            for (int i = 0; i < ChunkLayout.Volume; i++) cells[i] = palette[(int)Read(wordCells, i, BitsPerEntry)];
             words.Resize(WordCount(DirectBits), NativeArrayOptions.UninitializedMemory);
-            var destination = words.AsArray();
+            palette.Clear();
+            palette.Add(0);
+            Refresh();
+            var destination = wordCells;
             for (int i = 0; i < destination.Length; i++) destination[i] = 0;
             Storage = ChannelStorage.Direct;
             BitsPerEntry = DirectBits;
             for (int i = 0; i < ChunkLayout.Volume; i++) Write(destination, i, cells[i], DirectBits);
-            palette.Clear();
             lookup.Dispose();
             lookup = default;
         }
