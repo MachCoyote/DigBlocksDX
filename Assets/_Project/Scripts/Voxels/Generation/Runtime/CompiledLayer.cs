@@ -83,6 +83,104 @@ namespace DigBlocks.Voxels.Generation
         }
     }
 
+    /// <summary>A density stage with its field compiled and its lattice worked out.</summary>
+    internal sealed class CompiledDensity : IDisposable
+    {
+        private readonly NoiseProgram program;
+        private Unity.Collections.NativeArray<DensityGradientData> gradients;
+        private readonly int gradientCount;
+
+        public readonly int3 Resolution, LatticeSize;
+        public readonly int LatticeCount;
+        public readonly float Threshold;
+        public readonly uint AddBlock;
+        public readonly DensityMode Mode;
+
+        public int SlotCount => program.SlotCount;
+
+        public CompiledDensity(DensityStage stage, GenSeed layerSeed, IBlockResolver blocks)
+        {
+            program = NoiseProgram.Compile(stage.Field, layerSeed.Derive(stage.Name));
+            Resolution = stage.Resolution;
+            LatticeSize = ColumnFillKernel.Edge / Resolution + 1;
+            LatticeCount = LatticeSize.x * LatticeSize.y * LatticeSize.z;
+            Threshold = stage.Threshold;
+            Mode = stage.Mode;
+            AddBlock = stage.Mode == DensityMode.Add ? blocks.Solid(stage.AddBlock) : 0u;
+
+            gradientCount = stage.Gradients.Count;
+            gradients = new Unity.Collections.NativeArray<DensityGradientData>(
+                math.max(1, gradientCount), Unity.Collections.Allocator.Persistent);
+            for (int index = 0; index < gradientCount; index++)
+            {
+                var gradient = stage.Gradients[index];
+                gradients[index] = new DensityGradientData
+                {
+                    FromY = gradient.FromY, ToY = gradient.ToY,
+                    FromBias = gradient.FromBias, ToBias = gradient.ToBias
+                };
+            }
+        }
+
+        /// <summary>
+        /// Fills the lattice for one chunk. Sampling runs in batches the scratch can hold, so a fine
+        /// lattice is slower but never larger than the workspace.
+        /// </summary>
+        public unsafe void Sample(NoiseScratch scratch, float* lattice, int chunkX, int chunkZ, int chunkMinY)
+        {
+            var gradientData = (DensityGradientData*)Unity.Collections.LowLevel.Unsafe
+                .NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(gradients);
+            int baseX = chunkX * ColumnFillKernel.Edge, baseZ = chunkZ * ColumnFillKernel.Edge;
+            int written = 0;
+
+            while (written < LatticeCount)
+            {
+                int batch = math.min(scratch.Capacity, LatticeCount - written);
+                for (int offset = 0; offset < batch; offset++)
+                {
+                    int point = written + offset;
+                    int x = point % LatticeSize.x;
+                    int z = point / LatticeSize.x % LatticeSize.z;
+                    int y = point / (LatticeSize.x * LatticeSize.z);
+                    scratch.X[offset] = baseX + x * Resolution.x;
+                    scratch.Y[offset] = chunkMinY + y * Resolution.y;
+                    scratch.Z[offset] = baseZ + z * Resolution.z;
+                }
+
+                var noiseBatch = scratch.Batch(batch, withY: true);
+                program.Evaluate(ref noiseBatch);
+                if (gradientCount > 0)
+                    DensityDispatch.CompiledBias.Invoke(scratch.Result, scratch.Y, batch, gradientData, gradientCount);
+                Unity.Collections.LowLevel.Unsafe.UnsafeUtility.MemCpy(
+                    lattice + written, scratch.Result, (long)batch * sizeof(float));
+                written += batch;
+            }
+        }
+
+        public unsafe void Apply(float* lattice, int chunkMinY, int layerBottom, int layerTop, uint* solids)
+        {
+            var data = new DensityData
+            {
+                Lattice = lattice,
+                Resolution = Resolution,
+                LatticeSize = LatticeSize,
+                ChunkMinY = chunkMinY,
+                LayerBottom = layerBottom,
+                LayerTop = layerTop,
+                Threshold = Threshold,
+                AddBlock = AddBlock,
+                Mode = (byte)Mode
+            };
+            DensityDispatch.CompiledApply.Invoke(&data, solids);
+        }
+
+        public void Dispose()
+        {
+            program?.Dispose();
+            if (gradients.IsCreated) gradients.Dispose();
+        }
+    }
+
     /// <summary>
     /// A world layer with its programs compiled, its block keys resolved and its native memory
     /// allocated. Built once with the generator and shared by every generation worker, so it holds no
@@ -95,6 +193,10 @@ namespace DigBlocks.Voxels.Generation
         public readonly int SeaLevel;
         public readonly uint SeaFluid;
         public readonly bool HasSea;
+        public readonly CompiledDensity Density;
+        public readonly AquiferStage Aquifers;
+        public readonly uint AquiferFluid;
+        public readonly uint AquiferSeed;
 
         public CompiledLayer(WorldLayer layer, GenSeed worldSeed, IBlockResolver blocks)
         {
@@ -109,6 +211,14 @@ namespace DigBlocks.Voxels.Generation
                 HasSea = layer.SeaLevel.HasValue;
                 SeaLevel = layer.SeaLevel ?? 0;
                 SeaFluid = HasSea ? blocks.Fluid(layer.SeaFluid) : 0u;
+
+                if (layer.Density != null) Density = new CompiledDensity(layer.Density, layerSeed, blocks);
+                Aquifers = layer.Aquifers;
+                if (Aquifers != null)
+                {
+                    AquiferFluid = blocks.Fluid(Aquifers.Fluid);
+                    AquiferSeed = layerSeed.Derive(Aquifers.Name).Lattice;
+                }
             }
             catch
             {
@@ -121,11 +231,13 @@ namespace DigBlocks.Voxels.Generation
         {
             get
             {
-                int slots = 1;
+                int slots = Density?.SlotCount ?? 1;
                 foreach (var band in Bands) slots = math.max(slots, band.SlotCount);
                 return slots;
             }
         }
+
+        public int LatticeCount => Density?.LatticeCount ?? 0;
 
         /// <summary>
         /// Computes this layer's surface and extent heights for one chunk column. The result does not
@@ -187,18 +299,48 @@ namespace DigBlocks.Voxels.Generation
             }
         }
 
+        public unsafe void Carve(float* lattice, int chunkX, int chunkZ, int chunkMinY, NoiseScratch scratch, uint* solids)
+        {
+            if (Density == null) return;
+            Density.Sample(scratch, lattice, chunkX, chunkZ, chunkMinY);
+            Density.Apply(lattice, chunkMinY, Source.BottomBound, Source.TopBound, solids);
+        }
+
         public unsafe void FillSea(int chunkMinY, uint* solids, uint* fluids)
         {
             if (!HasSea) return;
             var data = new SeaFillData
             {
                 ChunkMinY = chunkMinY,
-                LayerBottom = Source.BottomBound,
+                //where a layer has aquifers, they own the water below their top and the sea owns only
+                //what is above it. Otherwise a blanket sea fill would flood every carved cavern down to
+                //the floor, and no region could be dry.
+                LayerBottom = Aquifers == null ? Source.BottomBound : math.max(Source.BottomBound, Aquifers.MaxY + 1),
                 LayerTop = Source.TopBound,
                 SeaLevel = SeaLevel,
                 Fluid = SeaFluid
             };
             ColumnFillDispatch.CompiledSea.Invoke(&data, solids, fluids);
+        }
+
+        public unsafe void FillAquifers(int chunkX, int chunkZ, int chunkMinY, uint* solids, uint* fluids)
+        {
+            if (Aquifers == null) return;
+            var data = new AquiferData
+            {
+                Seed = AquiferSeed,
+                CellSize = Aquifers.CellSize,
+                ChunkMinY = chunkMinY,
+                MinY = math.max(Aquifers.MinY, Source.BottomBound),
+                MaxY = math.min(Aquifers.MaxY, Source.TopBound),
+                BaseLevel = Aquifers.BaseLevel,
+                LevelJitter = Aquifers.LevelJitter,
+                ChunkX = chunkX,
+                ChunkZ = chunkZ,
+                Fluid = AquiferFluid,
+                DryChance = Aquifers.DryChance
+            };
+            DensityDispatch.CompiledAquifers.Invoke(&data, solids, fluids);
         }
 
         //heights are brought inside the integer range before conversion, so an expression that runs
@@ -220,6 +362,7 @@ namespace DigBlocks.Voxels.Generation
         public void Dispose()
         {
             foreach (var band in Bands) band?.Dispose();
+            Density?.Dispose();
         }
     }
 }

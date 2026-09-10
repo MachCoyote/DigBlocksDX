@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
 namespace DigBlocks.Voxels.Generation
@@ -13,21 +15,30 @@ namespace DigBlocks.Voxels.Generation
     /// computes that column's heights once.
     /// </para>
     /// </summary>
-    public sealed class GenerationContext : IDisposable
+    public sealed unsafe class GenerationContext : IDisposable
     {
         internal readonly NoiseScratch Scratch;
         private readonly LayerColumnPlan[] plans;
+        private readonly NativeArray<float>[] lattices;
         private bool disposed;
 
         internal GenerationContext(int slotCount, IReadOnlyList<CompiledLayer> layers)
         {
             Scratch = new NoiseScratch(slotCount, ColumnFillKernel.Columns);
             plans = new LayerColumnPlan[layers.Count];
+            lattices = new NativeArray<float>[layers.Count];
             for (int index = 0; index < plans.Length; index++)
+            {
                 plans[index] = new LayerColumnPlan(math.max(1, layers[index].Bands.Length));
+                int lattice = layers[index].LatticeCount;
+                if (lattice > 0) lattices[index] = new NativeArray<float>(lattice, Allocator.Persistent);
+            }
         }
 
         internal LayerColumnPlan Plan(int layer) => plans[layer];
+
+        internal unsafe float* Lattice(int layer)
+            => lattices[layer].IsCreated ? (float*)lattices[layer].GetUnsafePtr() : null;
 
         public void Dispose()
         {
@@ -35,6 +46,7 @@ namespace DigBlocks.Voxels.Generation
             disposed = true;
             Scratch.Dispose();
             foreach (var plan in plans) plan.Dispose();
+            foreach (var lattice in lattices) if (lattice.IsCreated) lattice.Dispose();
         }
     }
 
@@ -113,6 +125,7 @@ namespace DigBlocks.Voxels.Generation
             //compiling the kernels here means a generation worker never discovers it needs to.
             NoiseKernelDispatch.Warm();
             ColumnFillDispatch.Warm();
+            DensityDispatch.Warm();
         }
 
         /// <summary>
@@ -180,8 +193,12 @@ namespace DigBlocks.Voxels.Generation
                         var layer = compiled[index];
                         var plan = context.Plan(index);
                         if (!plan.Describes(chunkX, chunkZ)) layer.Plan(plan, chunkX, chunkZ, context.Scratch);
+                        //shape, then carve what the shape made, then decide what fills the space that
+                        //is left. Reordering any of these changes what the world looks like.
                         layer.Fill(plan, minY, solidBuffer);
+                        layer.Carve(context.Lattice(index), chunkX, chunkZ, minY, context.Scratch, solidBuffer);
                         layer.FillSea(minY, solidBuffer, fluidBuffer);
+                        layer.FillAquifers(chunkX, chunkZ, minY, solidBuffer, fluidBuffer);
                     }
                 }
             }
