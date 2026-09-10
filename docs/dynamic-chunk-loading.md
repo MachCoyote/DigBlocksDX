@@ -56,6 +56,14 @@ old and new neighborhoods:
 - A server chunk remains resident while any peer leases it. Releasing the final lease
   removes its current data and entities from the resident store.
 
+Rapid movement can supersede an interest before its declaration reaches the client. In that case
+an address may leave and re-enter server residency while appearing continuously interested to the
+client. The live-epoch full snapshot is authoritative and replaces the client's retained older
+incarnation, including when the new incarnation's revision sequence restarted. Deltas remain strict
+and still require the exact incarnation and base revision. Recovery allowances are tracked per chunk
+so unrelated baseline failures in one apply batch cannot consume a shared retry counter. See
+[chunk interest incarnation recovery](chunk-interest-incarnation-recovery.md).
+
 Superseded on September 9, 2026: the scheduler described here carried one active transfer
 per peer and would not request the next chunk until the current one was acknowledged. That
 serialisation dominated load time and was replaced by a bounded in-flight window. See

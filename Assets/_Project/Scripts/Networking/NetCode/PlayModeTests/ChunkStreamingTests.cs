@@ -83,6 +83,92 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         }
 
         [Test]
+        public void ResyncRetriesAreCountedPerChunkInsteadOfAcrossIndependentChunks()
+        {
+            using var world = new World("Streaming resync accounting");
+            var registry = BlockRegistry.CreateDummy();
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry); store.EnableReplicas();
+            var interest = new ChunkInterest(1, Address, 1, 0);
+            var replies = new List<byte[]>();
+            bool failed = false;
+            using var client = new ChunkStreamingClient(store, registry,
+                new ChunkStreamingOptions(1, 0, appliesPerTick: 8),
+                packet => { replies.Add(packet); return true; }, () => failed = true, 0);
+            client.Receive(ChunkTransferFrames.EncodeInterest(interest), 0);
+            var addresses = interest.Addresses();
+            for (int i = 0; i < 3; i++)
+            {
+                var delta = new ChunkDelta(addresses[i], 1, 1, 2,
+                    new[] { new ChunkCellUpdate(0, 1, 0) });
+                byte[] payload = ChunkWireCodec.EncodeDelta(delta);
+                Deliver(client, new TransferStart((ulong)i + 1, 1, addresses[i], 1, 2,
+                    payload.Length, true), payload, 0);
+            }
+
+            client.Tick(0);
+            Assert.That(failed, Is.False, "Independent chunks must not consume one shared retry allowance.");
+            Assert.That(replies.Count, Is.EqualTo(3));
+            foreach (var reply in replies)
+                Assert.That(ChunkTransferFrames.ReadKind(reply), Is.EqualTo(ChunkFrameKind.Resync));
+
+            for (ulong id = 4; id <= 5; id++)
+            {
+                var delta = new ChunkDelta(addresses[0], 1, 1, 2,
+                    new[] { new ChunkCellUpdate(0, 1, 0) });
+                byte[] payload = ChunkWireCodec.EncodeDelta(delta);
+                Deliver(client, new TransferStart(id, 1, addresses[0], 1, 2,
+                    payload.Length, true), payload, 1);
+            }
+            client.Tick(1);
+            Assert.That(failed, Is.True, "Repeated failure of the same chunk must remain bounded.");
+            Assert.That(replies.Count, Is.EqualTo(4), "The terminal attempt must fail instead of queuing another resync.");
+        }
+
+        [Test]
+        public void ServerResyncRetriesAreCountedPerChunkInsteadOfAcrossIndependentChunks()
+        {
+            using var world = new World("Server resync accounting");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            var packets = new List<byte[]>();
+            bool failed = false;
+            using var server = new ChunkStreamingServer(store,
+                new ChunkStreamingOptions(1, 0, peerWindow: 8),
+                (_, packet) => { packets.Add(packet); return true; }, _ => failed = true);
+            Assert.That(server.Add(1, 0), Is.True);
+            server.Tick(0);
+
+            var starts = new List<TransferStart>();
+            foreach (var packet in packets)
+                if (ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Start)
+                    starts.Add(ChunkTransferFrames.DecodeStart(packet));
+            Assert.That(starts.Count, Is.GreaterThanOrEqualTo(3));
+            for (int i = 0; i < 3; i++)
+                server.Receive(1, ChunkTransferFrames.EncodeResync(starts[i].TransferId), 0);
+
+            Assert.That(failed, Is.False, "Independent chunks must not consume one shared server retry allowance.");
+
+            var retriedAddress = starts[0].Address;
+            for (int attempt = 2; attempt <= 3; attempt++)
+            {
+                packets.Clear();
+                server.Tick(attempt);
+                TransferStart replacement = default;
+                bool found = false;
+                foreach (var packet in packets)
+                {
+                    if (ChunkTransferFrames.ReadKind(packet) != ChunkFrameKind.Start) continue;
+                    var candidate = ChunkTransferFrames.DecodeStart(packet);
+                    if (!candidate.Address.Equals(retriedAddress)) continue;
+                    replacement = candidate; found = true; break;
+                }
+                Assert.That(found, Is.True, "The server must replace a resynced transfer.");
+                server.Receive(1, ChunkTransferFrames.EncodeResync(replacement.TransferId), attempt);
+                Assert.That(failed, Is.EqualTo(attempt > 2),
+                    "Only the third failure of the same chunk may exhaust its server retry allowance.");
+            }
+        }
+
+        [Test]
         public void ClientAnchorRequestUsesServerOwnedDistancesAndRejectsAnotherWorld()
         {
             using var serverWorld = new World("Moving interest source");

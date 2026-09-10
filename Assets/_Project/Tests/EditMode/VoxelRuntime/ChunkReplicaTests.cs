@@ -92,6 +92,30 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(store.DataReady, Is.False);
         }
 
+        [Test]
+        public void CurrentEpochFullSnapshotReplacesAnIncarnationRetainedAcrossSkippedInterest()
+        {
+            using var world = new World("Replica incarnation replacement");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy());
+            store.EnableReplicas();
+            var address = new ChunkAddress(1, default);
+            Assert.That(store.SetReplicaInterest(new ChunkInterest(1, address, 0, 0)), Is.True);
+            Assert.That(store.PublishReplica(1, new ChunkImage(address, 7, 4,
+                new uint[ChunkLayout.Volume], new uint[ChunkLayout.Volume])), Is.True);
+
+            //Epoch two existed only on the server and temporarily evicted this address. The client
+            //receives epoch three directly and therefore still holds the old incarnation.
+            Assert.That(store.SetReplicaInterest(new ChunkInterest(3, address, 0, 0)), Is.True);
+            var solids = new uint[ChunkLayout.Volume];
+            solids[0] = 1;
+            Assert.That(store.PublishReplica(3, new ChunkImage(address, 11, 1, solids,
+                new uint[ChunkLayout.Volume])), Is.True);
+            Assert.That(store.TryReadReplica(address, out var replacement), Is.True);
+            Assert.That(replacement.Incarnation, Is.EqualTo(11));
+            Assert.That(replacement.Revision, Is.EqualTo(1));
+            Assert.That(replacement.SolidAt(0), Is.EqualTo(1));
+        }
+
         //A neighbour only re-meshes when the plane facing it changes, so publication reports exactly
         //which boundary planes moved. An interior edit must report none.
         [Test]

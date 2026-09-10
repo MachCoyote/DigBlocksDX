@@ -108,7 +108,8 @@ namespace DigBlocks.Networking.NetCode
                 Port = driver.LocalPort; State = ChunkConnectionState.Listening;
                 streamingServer = new ChunkStreamingServer(store, streamingOptions,
                     (id, packet) => peers.TryGetValue(id, out var peer) && Live(Context, id, peer) && driver.TrySend(peer.Connection, packet),
-                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed), source,
+                    id => FailPeer(id, NetworkFailure.ChunkChannelFailed,
+                        $"Server chunk stream exhausted its progress retries; {streamingServer?.DescribePeer(id) ?? "state unavailable"}."), source,
                     //slice to what this connection's pipeline actually accepts; the path MTU decides it.
                     id => peers.TryGetValue(id, out var peer) && peer.Connection.IsCreated ? driver.PayloadCapacity(peer.Connection) : 0,
                     directEnabled, deliverDirect);
@@ -166,7 +167,12 @@ namespace DigBlocks.Networking.NetCode
             try { streamingServer?.Tick(Now); streamingClient?.Tick(Now); }
             catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
             {
-                if (server) Dispose(); else FailClient(NetworkFailure.ChunkChannelFailed);
+                if (server)
+                {
+                    LogFailure("Server chunk streaming tick failed.", exception);
+                    Dispose();
+                }
+                else FailClient(NetworkFailure.ChunkChannelFailed, "Client chunk streaming tick failed.", exception);
                 return;
             }
             if (disposed || !server) return;
@@ -226,7 +232,11 @@ namespace DigBlocks.Networking.NetCode
             {
                 pending.Remove(item.Connection);
                 if (bound.TryGetValue(item.Connection, out ulong id))
-                { FailPeer(id, NetworkFailure.ChunkChannelFailed); RemovePeer(id); }
+                {
+                    FailPeer(id, NetworkFailure.ChunkChannelFailed,
+                        "Server bulk transport reported that a bound chunk peer disconnected.");
+                    RemovePeer(id);
+                }
                 return;
             }
             if (!pending.TryGetValue(item.Connection, out double pendingDeadline))
@@ -235,7 +245,7 @@ namespace DigBlocks.Networking.NetCode
                 {
                     try { streamingServer.Receive(id, item.Payload, Now); }
                     catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
-                    { FailPeer(id, NetworkFailure.ChunkChannelFailed); }
+                    { FailPeer(id, NetworkFailure.ChunkChannelFailed, "Server rejected a bound chunk frame.", exception); }
                     return;
                 }
                 driver.Disconnect(item.Connection); return;
@@ -263,7 +273,12 @@ namespace DigBlocks.Networking.NetCode
         private void ClientEvent(BulkDriverEvent item)
         {
             if (item.Connection != clientConnection) { FailClient(NetworkFailure.InvalidResponse); return; }
-            if (item.Type == BulkEventType.Disconnected) { FailClient(NetworkFailure.ChunkChannelFailed); return; }
+            if (item.Type == BulkEventType.Disconnected)
+            {
+                FailClient(NetworkFailure.ChunkChannelFailed,
+                    "Client bulk transport reported that the bound chunk connection closed.");
+                return;
+            }
             var offer = clientOffer.Value;
             if (item.Type == BulkEventType.Connected)
             {
@@ -275,7 +290,7 @@ namespace DigBlocks.Networking.NetCode
             {
                 try { streamingClient.Receive(item.Payload, Now); }
                 catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
-                { FailClient(NetworkFailure.ChunkChannelFailed); }
+                { FailClient(NetworkFailure.ChunkChannelFailed, "Client rejected a bound chunk frame.", exception); }
                 return;
             }
             try
@@ -284,13 +299,19 @@ namespace DigBlocks.Networking.NetCode
                 if (peer != offer.PeerId || generation != offer.Generation) { FailClient(NetworkFailure.InvalidResponse); return; }
                 State = ChunkConnectionState.Bound;
                 streamingClient = new ChunkStreamingClient(store, registry, streamingOptions,
-                    packet => driver.TrySend(clientConnection, packet), () => FailClient(NetworkFailure.ChunkChannelFailed), Now);
+                    packet => driver.TrySend(clientConnection, packet),
+                    () => FailClient(NetworkFailure.ChunkChannelFailed,
+                        $"Client chunk stream exhausted its progress retries; {streamingClient?.DescribeState() ?? "state unavailable"}."), Now);
             }
             catch (FormatException) { FailClient(NetworkFailure.ChunkChannelFailed); }
         }
         private void RejectPending(NetworkConnection connection) { pending.Remove(connection); driver.Disconnect(connection); }
-        private void FailPeer(ulong id, NetworkFailure reason)
-        { tickets.Revoke(id); if (peers.TryGetValue(id, out var peer)) NetCodeSession.QueueClose(world.EntityManager, peer.Entity, reason); }
+        private void FailPeer(ulong id, NetworkFailure reason, string message = null, Exception exception = null)
+        {
+            if (message != null) LogFailure($"{message} peer={id}; state={State}; reason={reason}.", exception);
+            tickets.Revoke(id);
+            if (peers.TryGetValue(id, out var peer)) NetCodeSession.QueueClose(world.EntityManager, peer.Entity, reason);
+        }
         private void RemovePeer(ulong id)
         {
             tickets.Revoke(id); streamingServer?.Remove(id);
@@ -298,11 +319,14 @@ namespace DigBlocks.Networking.NetCode
             if (peer.Connection.IsCreated) { bound.Remove(peer.Connection); driver.Disconnect(peer.Connection); }
             peers.Remove(id);
         }
-        private void FailClient(NetworkFailure reason)
+        private void FailClient(NetworkFailure reason, string message = null, Exception exception = null)
         {
+            if (message != null) LogFailure($"{message} state={State}; reason={reason}.", exception);
             if (Failure == NetworkFailure.None) Failure = reason;
             Context?.Fail(Failure); Dispose(); State = ChunkConnectionState.Faulted;
         }
+        private void LogFailure(string message, Exception exception = null) =>
+            Context?.Logger?.Log(message, DigBlocks.Core.Hosting.GameLogLevel.Error, exception);
         public void Dispose()
         {
             if (disposed) return;

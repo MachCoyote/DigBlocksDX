@@ -5,6 +5,10 @@ Status: implemented September 10, 2026. Acts on
 motivated it, and follows the plan in
 [superpowers/plans/2026-09-09-chunk-loading-optimization.md](superpowers/plans/2026-09-09-chunk-loading-optimization.md).
 
+The larger apply batch exposed an interest/incarnation recovery race during rapid movement. It was
+corrected without adding allocation to the successful streaming path; see
+[chunk interest incarnation recovery](chunk-interest-incarnation-recovery.md).
+
 Supersedes the "what now caps load speed" section of
 [chunk-streaming-throughput.md](chunk-streaming-throughput.md) and the two deferred options recorded
 in [chunk-apply-frame-cost.md](chunk-apply-frame-cost.md).

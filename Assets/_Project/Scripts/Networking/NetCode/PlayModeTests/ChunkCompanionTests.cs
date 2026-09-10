@@ -398,6 +398,29 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(server.BoundPeerCount, Is.Zero);
         });
 
+        [UnityTest]
+        public IEnumerator MalformedBoundChunkFrameLogsTheOriginalFailureBeforeDisconnecting() => UniTask.ToCoroutine(async () =>
+        {
+            var server = CreateServer(out var serverSession, out var serverHost);
+            await serverHost.StartAsync(CancellationToken.None);
+            var (_, offer) = await ProbeClient(serverSession.ListeningPort, 112);
+            using var raw = new BulkDriver(false, false, NetworkEndpoint.LoopbackIpv4.WithPort(0));
+            var connection = await ConnectRaw(raw, offer.Port);
+            var request = BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation,
+                new BulkTicket(offer.TicketHigh, offer.TicketLow), offer.Edge, offer.Fingerprint.ToString()));
+            await Exchange(raw, connection, request, true);
+            Assert.That(raw.TrySend(connection, new byte[] { byte.MaxValue }), Is.True);
+            double deadline = Time.realtimeSinceStartupAsDouble + 5;
+            while (logger.LastException == null && Time.realtimeSinceStartupAsDouble < deadline)
+            {
+                raw.Update();
+                await UniTask.Yield();
+            }
+            Assert.That(logger.LastLevel, Is.EqualTo(GameLogLevel.Error));
+            Assert.That(logger.LastMessage, Does.Contain("Server").And.Contain("chunk frame"));
+            Assert.That(logger.LastException, Is.TypeOf<FormatException>());
+        });
+
         private async UniTask<(NetCodeSession, BulkConnectionOfferRpc)> ProbeClient(ushort port, ulong identity)
         {
             BulkOfferProbeSystem probe = null;
@@ -464,7 +487,14 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         [UnityTearDown] public IEnumerator Cleanup() => UniTask.ToCoroutine(async () =>
         { for (int i = hosts.Count - 1; i >= 0; i--) await hosts[i].StopAsync(CancellationToken.None); hosts.Clear(); });
         private sealed class NullLogger : IGameLogger
-        { public IGameLogger CreateFor(string sourceName) => this; public void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null) { } }
+        {
+            public string LastMessage { get; private set; }
+            public GameLogLevel LastLevel { get; private set; }
+            public Exception LastException { get; private set; }
+            public IGameLogger CreateFor(string sourceName) => this;
+            public void Log(string message, GameLogLevel level = GameLogLevel.Information, Exception exception = null)
+            { LastMessage = message; LastLevel = level; LastException = exception; }
+        }
     }
 
     [DisableAutoCreation]

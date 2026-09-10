@@ -20,6 +20,9 @@ namespace DigBlocks.Networking.NetCode
         //fully received but not yet decoded. Bounded by the server's in-flight window, because a transfer
         //only leaves that window once its acknowledgement goes back, which happens after it is applied.
         private readonly Queue<Completed> completed = new();
+        //Recovery belongs to one chunk's baseline/incarnation chain. Counting unrelated chunks
+        //together lets a batch of independently recoverable publications disconnect the session.
+        private Dictionary<ChunkAddress, int> resyncAttempts;
 
         private readonly struct Completed
         {
@@ -37,8 +40,13 @@ namespace DigBlocks.Networking.NetCode
         private readonly PackedChannelData scratchSolids = new(), scratchFluids = new();
         private byte[] interestRequest;
         private double deadline;
-        private int retries;
         private bool disposed;
+
+        public string DescribeState() =>
+            $"epoch={interest?.Epoch ?? 0}; anchor={interest?.Anchor.ToString() ?? "none"}; active={active.Count}; " +
+            $"completed={completed.Count}; responses={responses.Count}; interestRequestQueued={interestRequest != null}; " +
+            $"dataReady={store.DataReady}; resyncingChunks={resyncAttempts?.Count ?? 0}";
+
         public ChunkStreamingClient(ResidentChunkStore store, DigBlocks.Voxels.BlockRegistry registry, ChunkStreamingOptions options,
             Func<byte[], bool> send, Action fail, double now)
         {
@@ -72,7 +80,7 @@ namespace DigBlocks.Networking.NetCode
                     return;
                 }
                 if (!store.SetReplicaInterest(next)) throw new FormatException("Rejected live interest.");
-                interest = next; assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); retries = 0;
+                interest = next; assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); resyncAttempts = null;
                 //every transfer declared under the old epoch is dead, so settle the whole range at once.
                 retired.Clear(); retiredFloor = Math.Max(retiredFloor, highestSeen);
                 deadline = now + options.ProgressTimeout;
@@ -117,7 +125,7 @@ namespace DigBlocks.Networking.NetCode
                 if (!delta.Address.Equals(declaration.Address) || delta.Incarnation != declaration.Incarnation || delta.ResultRevision != declaration.Revision)
                     throw new FormatException("Delta differs from declaration.");
                 if (!store.TryReadReplica(delta.Address, out var baseline) || baseline.Incarnation != delta.Incarnation || baseline.Revision != delta.BaseRevision)
-                { RequestResync(id, now); return; }
+                { RequestResync(declaration, now); return; }
                 image = delta.ApplyTo(baseline);
             }
             else
@@ -129,21 +137,32 @@ namespace DigBlocks.Networking.NetCode
                 if (!address.Equals(declaration.Address) || incarnation != declaration.Incarnation || revision != declaration.Revision)
                     throw new FormatException("Snapshot differs from declaration.");
                 if (!store.PublishReplica(declaration.SubscriptionGeneration, address, incarnation, revision, scratchSolids, scratchFluids))
-                { RequestResync(id, now); return; }
+                { RequestResync(declaration, now); return; }
                 responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, revision));
-                retries = 0;
+                ClearResyncAttempt(address);
                 return;
             }
-            if (!store.PublishReplica(declaration.SubscriptionGeneration, image)) { RequestResync(id, now); return; }
+            if (!store.PublishReplica(declaration.SubscriptionGeneration, image)) { RequestResync(declaration, now); return; }
             responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, image.Revision));
-            retries = 0;
+            ClearResyncAttempt(image.Address);
         }
 
-        private void RequestResync(ulong id, double now)
+        private void ClearResyncAttempt(ChunkAddress address)
+        {
+            if (resyncAttempts == null) return;
+            resyncAttempts.Remove(address);
+            if (resyncAttempts.Count == 0) resyncAttempts = null;
+        }
+
+        private void RequestResync(TransferStart declaration, double now)
         {
             //the server restarts a resynced chunk under a fresh identity, so this one is finished either way.
+            ulong id = declaration.TransferId;
             assembler.Cancel(id); active.Remove(id); Retire(id);
-            if (++retries > 2) { fail(); return; }
+            resyncAttempts ??= new Dictionary<ChunkAddress, int>();
+            resyncAttempts.TryGetValue(declaration.Address, out int attempts);
+            if (++attempts > 2) { fail(); return; }
+            resyncAttempts[declaration.Address] = attempts;
             responses.Enqueue(ChunkTransferFrames.EncodeResync(id)); deadline = now + options.ProgressTimeout;
         }
 
@@ -189,7 +208,7 @@ namespace DigBlocks.Networking.NetCode
                 //oldest declaration first; resyncing one is enough to restart progress.
                 ulong oldest = ulong.MaxValue;
                 foreach (ulong id in active.Keys) oldest = Math.Min(oldest, id);
-                RequestResync(oldest, now);
+                RequestResync(active[oldest], now);
             }
             else if (responses.Count != 0 || interest == null || !store.DataReady) fail();
         }
@@ -197,7 +216,7 @@ namespace DigBlocks.Networking.NetCode
         public void Dispose()
         {
             if (disposed) return;
-            assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); retired.Clear(); interestRequest = null; store.ClearReplicas(); disposed = true;
+            assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); resyncAttempts = null; retired.Clear(); interestRequest = null; store.ClearReplicas(); disposed = true;
         }
     }
 }

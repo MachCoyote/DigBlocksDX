@@ -76,14 +76,36 @@ namespace DigBlocks.Networking.NetCode
         public int PayloadCount { get; private set; }
         private long payloadBytes;
 
+        public string DescribePeer(ulong id)
+        {
+            if (!peers.TryGetValue(id, out var peer)) return "streaming peer is not registered";
+            int started = 0, awaitingAck = 0, recoveringChunks = 0, maxTransferRetries = 0;
+            foreach (var transfer in peer.Transfers)
+            {
+                if (transfer.Started) started++;
+                if (transfer.AwaitingAck) awaitingAck++;
+            }
+            foreach (int attempts in peer.TransferRetries)
+            {
+                if (attempts != 0) recoveringChunks++;
+                maxTransferRetries = Math.Max(maxTransferRetries, attempts);
+            }
+            return $"epoch={peer.Interest?.Epoch ?? 0}; anchor={peer.Interest?.Anchor.ToString() ?? "none"}; " +
+                $"declarationQueued={peer.Declaration != null}; transfers={peer.Transfers.Count}; " +
+                $"started={started}; awaitingAck={awaitingAck}; payloads={PayloadCount}; " +
+                $"declarationRetries={peer.DeclarationRetries}; recoveringChunks={recoveringChunks}; maxTransferRetries={maxTransferRetries}";
+        }
+
         private sealed class Peer
         {
             public ulong Id;
             public ChunkInterest Interest;
             public ChunkLease[] Leases = Array.Empty<ChunkLease>();
-            public ulong[] Baselines;
+            public ulong[] Baselines = Array.Empty<ulong>();
+            //Parallel to leases so unrelated transfers never share a retry allowance.
+            public int[] TransferRetries = Array.Empty<int>();
             public byte[] Declaration;
-            public int Cursor, Retries, RoundRobin;
+            public int Cursor, DeclarationRetries, RoundRobin;
             public bool Failed;
             public double Deadline;
             public readonly List<Transfer> Transfers = new();
@@ -134,8 +156,9 @@ namespace DigBlocks.Networking.NetCode
             if (!store.TryReplaceLeases(peer.Leases, interest.Addresses(), out var leases)) return false;
             CancelAll(peer);
             peer.Interest = interest; peer.Leases = leases; peer.Baselines = new ulong[leases.Length];
+            peer.TransferRetries = new int[leases.Length];
             for (int i = 0; i < leases.Length; i++) retainedBaselines.TryGetValue(leases[i].Address, out peer.Baselines[i]);
-            peer.Declaration = ChunkTransferFrames.EncodeInterest(interest); peer.Cursor = 0; peer.Retries = 0; peer.RoundRobin = 0;
+            peer.Declaration = ChunkTransferFrames.EncodeInterest(interest); peer.Cursor = 0; peer.DeclarationRetries = 0; peer.RoundRobin = 0;
             peer.Deadline = now + options.ProgressTimeout;
             return true;
         }
@@ -161,9 +184,11 @@ namespace DigBlocks.Networking.NetCode
                 var transfer = Find(peer, id2);
                 if (transfer == null) return;
                 if (!transfer.AwaitingAck || revision != transfer.Revision) throw new FormatException("Invalid applied acknowledgement.");
-                peer.Baselines[transfer.LeaseIndex] = revision; AppliedAcknowledgements++;
+                peer.Baselines[transfer.LeaseIndex] = revision;
+                peer.TransferRetries[transfer.LeaseIndex] = 0;
+                AppliedAcknowledgements++;
                 MaxAppliedAckSeconds = Math.Max(MaxAppliedAckSeconds, now - transfer.Began);
-                Retire(peer, transfer); peer.Retries = 0;
+                Retire(peer, transfer);
                 return;
             }
             if (kind != ChunkFrameKind.Resync) throw new FormatException("Unexpected client chunk frame.");
@@ -194,7 +219,7 @@ namespace DigBlocks.Networking.NetCode
                 {
                     if (now >= peer.Deadline) { RetryPeer(peer, now); continue; }
                     if (!Send(peer, peer.Declaration, ref allowance, ref budget)) continue;
-                    peer.Declaration = null; peer.Deadline = now + options.ProgressTimeout;
+                    peer.Declaration = null; peer.DeclarationRetries = 0; peer.Deadline = now + options.ProgressTimeout;
                 }
 
                 expired.Clear();
@@ -339,17 +364,18 @@ namespace DigBlocks.Networking.NetCode
 
         private void RetryTransfer(Peer peer, Transfer transfer, double now)
         {
-            peer.Baselines[transfer.LeaseIndex] = 0;
+            int leaseIndex = transfer.LeaseIndex;
+            peer.Baselines[leaseIndex] = 0;
             Retire(peer, transfer);
             peer.Deadline = now + options.ProgressTimeout;
-            if (++peer.Retries > 2) { peer.Failed = true; fail(peer.Id); }
+            if (++peer.TransferRetries[leaseIndex] > 2) { peer.Failed = true; fail(peer.Id); }
         }
 
         private void RetryPeer(Peer peer, double now)
         {
             CancelAll(peer);
             peer.Deadline = now + options.ProgressTimeout;
-            if (++peer.Retries > 2) { peer.Failed = true; fail(peer.Id); }
+            if (++peer.DeclarationRetries > 2) { peer.Failed = true; fail(peer.Id); }
         }
 
         private void Retire(Peer peer, Transfer transfer)

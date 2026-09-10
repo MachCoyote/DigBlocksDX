@@ -398,11 +398,15 @@ namespace DigBlocks.Voxels.Runtime
             if (fluids == null) throw new ArgumentNullException(nameof(fluids));
             if (interest == null || epoch != interest.Epoch || !interest.Contains(address)) return false;
             chunks.TryGetValue(address, out var previous);
-            if (previous != null && (previous.Data.Incarnation != incarnation || previous.Data.Revision > revision)) return false;
+            //A skipped interest declaration can hide a server-side eviction and re-entry from the
+            //client. A full publication from the live epoch is authoritative, so a new incarnation
+            //replaces the retained replica even when its revision sequence restarted. Revision
+            //ordering remains strict within one incarnation.
+            if (previous != null && previous.Data.Incarnation == incarnation && previous.Data.Revision > revision) return false;
             ValidateStates(solids, true);
             ValidateStates(fluids, false);
             RequirePermittedFluids(solids, fluids);
-            if (previous != null && previous.Data.Revision == revision)
+            if (previous != null && previous.Data.Incarnation == incarnation && previous.Data.Revision == revision)
             {
                 for (int i = 0; i < ChunkLayout.Volume; i++)
                     if (previous.Data.SolidAt(i) != solids.Get(i) || previous.Data.FluidAt(i) != fluids.Get(i))
