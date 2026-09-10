@@ -11,6 +11,9 @@ namespace DigBlocks.Voxels.Generation
         {
             TerrainGeneratorRegistry.Register(new ClassicGenerator());
             TerrainGeneratorRegistry.Register(new FlatGenerator());
+            //a worked reference rather than a world anyone would play. It exists to be read, and is
+            //registered so it can also be looked at.
+            TerrainGeneratorRegistry.Register(new DemoGenerator());
         }
 
         /// <summary>The world type used when nothing has chosen one.</summary>

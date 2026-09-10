@@ -77,7 +77,7 @@ namespace DigBlocks.Voxels.Content.Tests
             var registry = content.Registry;
             Assert.That(content.Materials.Count, Is.EqualTo(1));
             Assert.That(content.Materials[0].Key, Is.EqualTo("digblocks:opaque"));
-            Assert.That(content.Materials[0].SliceCount, Is.EqualTo(14));
+            Assert.That(content.Materials[0].SliceCount, Is.EqualTo(32));
 
             ushort Slice(string key, BlockFace face) =>
                 content.SolidAppearanceOf(registry.LookupSolid(key)).Faces[(int)face].Texture;
@@ -90,8 +90,7 @@ namespace DigBlocks.Voxels.Content.Tests
             Assert.That(Slice("digblocks:grass_block", BlockFace.Down), Is.EqualTo(3));
             Assert.That(Slice("digblocks:bedrock", BlockFace.North), Is.EqualTo(5));
             Assert.That(Slice("digblocks:gravel", BlockFace.North), Is.EqualTo(13));
-            //sand borrows the cobblestone slice until it has art of its own, so these two match on purpose.
-            Assert.That(Slice("digblocks:sand", BlockFace.North), Is.EqualTo(8));
+            Assert.That(Slice("digblocks:sand", BlockFace.North), Is.EqualTo(14));
             Assert.That(Slice("digblocks:cobblestone", BlockFace.North), Is.EqualTo(8));
 
             //water is generated into the fluid channel but nothing meshes fluids yet, so it carries no

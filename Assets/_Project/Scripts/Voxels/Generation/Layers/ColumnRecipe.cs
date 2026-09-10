@@ -124,17 +124,20 @@ namespace DigBlocks.Voxels.Generation
         {
             if (resolver == null) throw new ArgumentNullException(nameof(resolver));
             strataCount = source.Strata.Count;
-            strataBlocks = new NativeArray<uint>(math.max(1, strataCount), Allocator.Persistent);
-            strataEnds = new NativeArray<int>(math.max(1, strataCount), Allocator.Persistent);
 
+            //every key is resolved before any native memory is taken, because a recipe naming a block
+            //that does not exist is the one failure this constructor can hit and anything allocated
+            //ahead of it would simply leak.
+            var resolvedBlocks = new uint[strataCount];
+            var resolvedEnds = new int[strataCount];
             //depths accumulate here so the fill loop compares against a boundary instead of subtracting
             //its way down the strata for every cell it writes.
             int cumulative = 0;
             for (int index = 0; index < strataCount; index++)
             {
                 cumulative += source.Strata[index].thickness;
-                strataBlocks[index] = resolver.Solid(source.Strata[index].block);
-                strataEnds[index] = cumulative;
+                resolvedBlocks[index] = resolver.Solid(source.Strata[index].block);
+                resolvedEnds[index] = cumulative;
             }
 
             deep = resolver.Solid(source.DeepBlock);
@@ -145,6 +148,14 @@ namespace DigBlocks.Voxels.Generation
             crest = source.CrestBlock == null ? 0u : resolver.Solid(source.CrestBlock);
             submergedDepth = source.SubmergedBlock == null ? 0 : source.SubmergedDepth;
             submerged = source.SubmergedBlock == null ? 0u : resolver.Solid(source.SubmergedBlock);
+
+            strataBlocks = new NativeArray<uint>(math.max(1, strataCount), Allocator.Persistent);
+            strataEnds = new NativeArray<int>(math.max(1, strataCount), Allocator.Persistent);
+            for (int index = 0; index < strataCount; index++)
+            {
+                strataBlocks[index] = resolvedBlocks[index];
+                strataEnds[index] = resolvedEnds[index];
+            }
         }
 
         public unsafe RecipeData Data

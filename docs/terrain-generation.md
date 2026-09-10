@@ -118,6 +118,47 @@ generation worker discovers it needs to compile something:
 
 Both must obey the determinism rules above.
 
+## Instruction set
+
+Everything a noise expression can do. Anything not on this list is not available,
+and nothing transcendental may be added, for the reasons under Determinism.
+
+| Built by | What it does |
+| --- | --- |
+| `NoiseExpr.X` `.Y` `.Z` | The sample coordinate, as ordinary leaf expressions |
+| `NoiseExpr.Constant(v)`, implicit from `float` | A literal |
+| `+ - * /`, unary `-` | Arithmetic, on expressions or floats |
+| `.Abs() .Floor() .Sqrt()` | Unary shaping |
+| `.Min(o) .Max(o) .Clamp(lo, hi)` | Bounding |
+| `.Lerp(other, t)` | `a + t * (b - a)` |
+| `.Remap(fromLo, fromHi, toLo, toHi)` | Rescale one range onto another; lowered to a multiply and an add |
+| `.Unsigned()` | `[-1, 1]` to `[0, 1]` |
+| `.Spread(softness)` | Spread a crowded field over its full range without clipping |
+| `.Ridge()` | Fold about zero, so zero crossings become crests |
+| `.Spline(knots…)` / `.Spline(Spline)` | Map a value through an authored curve |
+| `.Terrace(stepsPerUnit, smoothing)` | Quantize into flat steps |
+| `NoiseExpr.Select(value, threshold, below, above)` | The one branch in the set |
+| `Perlin2D` `Perlin3D` `Value2D` `Value3D` | Seeded fractal noise, with `FbmMode.Standard`, `Ridged` or `Billow` |
+| `NoiseExpr.Warp2D` / `Warp3D` | Offset coordinates by their own noise; returns the coordinates, not a field |
+| `NoiseExpr.External(id, name, a, b)` | Call a registered hand-written Burst function per sample |
+
+Two rules that are easy to get wrong:
+
+- **Spread before you shape.** Anything that reads a field as though it spanned
+  `[-1, 1]` — a spline, a `Remap`, a `Terrace` — should be given a spread field.
+- **Ridge after you spread**, rather than using `FbmMode.Ridged`.
+
+## Worked reference
+
+[`DemoGenerator.cs`](../Assets/_Project/Scripts/Voxels/Generation/Generators/DemoGenerator.cs)
+is a world type that uses every feature above at least once, with a comment on
+each explaining what it is and why it is there. It is registered as
+`digblocks:demo` and is deliberately busy: five layers from far underground to a
+kilometre up, one of them overlapping another to show what that does. It also
+carries worked implementations of the feature and biome seams, marked as such,
+so the shape of those contracts is visible from real authoring code.
+
+It exists to be read. A real world type uses a fraction of it.
 ## Shape
 
 A `SurfaceBand` produces one solid interval per column from a free face and an
@@ -204,8 +245,12 @@ reading one file.
   `terrainScale`, `seaLevel`.
 - **`digblocks:flat`** — level ground at a chosen height. For testing anything
   that is not terrain, and the smallest worked example of a definition.
+- **`digblocks:demo`** — the worked reference described above. Not content, and
+  deliberately not pinned to a fingerprint: it is a thing to read, and holding it
+  to a shape would make editing it a chore rather than the point of it. One smoke
+  test checks it still builds and still produces a world.
 
-`ShippedGeneratorTests` pins both against a recorded fingerprint. If a seed stops
+`ShippedGeneratorTests` pins classic and flat against a recorded fingerprint. If a seed stops
 producing that world, either a generator changed deliberately, in which case
 update the constant, or something in the noise path drifted, in which case every
 existing world has silently changed.
@@ -222,7 +267,6 @@ therefore carries no appearance; giving it one would fail the renderer's own
 check. Shores still work, because the water line decides them whether or not the
 water can be seen.
 
-Sand borrows the cobblestone texture slice until it has art of its own.
 
 ## Seams left for later
 
@@ -243,9 +287,9 @@ Declared, documented and deliberately unimplemented:
 
 ## Known follow-ups
 
-- `ChunkStreamingSettings.VerticalRenderDistanceChunks` is 2. A second world
-  layer roughly 100 blocks below the overworld needs about 5, which costs
-  streaming bandwidth and residency.
+- `ChunkStreamingSettings.VerticalRenderDistanceChunks` covers a fixed band around
+  the viewer, so layers far apart in Y need it raised. That costs streaming
+  bandwidth and residency, so it is worth measuring rather than guessing.
 - Worlds are not persisted, so a randomised seed resolves per session and the
   world type and seed are serialized fields on `DigBlocksBootstrap`.
 - Fluid meshing and a transparent render pass, without which oceans read as
