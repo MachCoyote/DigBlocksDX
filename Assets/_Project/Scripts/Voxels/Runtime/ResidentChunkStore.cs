@@ -47,6 +47,9 @@ namespace DigBlocks.Voxels.Runtime
         private readonly int maxResidents, maxSnapshots, ownerThread;
         private readonly Dictionary<ChunkAddress, Entry> chunks = new();
         private readonly List<Pending> snapshots = new();
+        //two 128 KiB buffers per encode would otherwise hit the large object heap for every chunk;
+        //workers return them here when they finish, so a steady load recycles a small fixed set.
+        private readonly System.Collections.Concurrent.ConcurrentBag<uint[]> cellBuffers = new();
         private ulong nextIncarnation = 1, nextRequest = 1;
         private bool disposed;
         private bool replicas;
@@ -274,21 +277,33 @@ namespace DigBlocks.Voxels.Runtime
 
         public bool PublishReplica(ulong epoch, ChunkImage image)
         {
+            if (image == null) throw new ArgumentNullException(nameof(image));
+            return PublishReplica(epoch, image.Address, image.Incarnation, image.Revision, image.Solids, image.Fluids);
+        }
+
+        //span overload so a decoded chunk can be published straight out of a reused buffer, with no
+        //ChunkImage and no 128 KiB copy per channel standing between the wire and the store.
+        public bool PublishReplica(ulong epoch, ChunkAddress address, ulong incarnation, ulong revision,
+            ReadOnlySpan<uint> solids, ReadOnlySpan<uint> fluids)
+        {
             RequireAlive();
             if (!replicas) throw new InvalidOperationException("Not a replica store.");
-            if (image == null) throw new ArgumentNullException(nameof(image));
-            if (interest == null || epoch != interest.Epoch || !interest.Contains(image.Address)) return false;
-            chunks.TryGetValue(image.Address, out var previous);
-            if (previous != null && (previous.Data.Incarnation != image.Incarnation || previous.Data.Revision > image.Revision)) return false;
+            if (incarnation == 0) throw new ArgumentOutOfRangeException(nameof(incarnation));
+            if (revision == 0) throw new ArgumentOutOfRangeException(nameof(revision));
+            if (solids.Length != ChunkLayout.Volume) throw new ArgumentException("Solid channel must contain exactly one chunk.", nameof(solids));
+            if (fluids.Length != ChunkLayout.Volume) throw new ArgumentException("Fluid channel must contain exactly one chunk.", nameof(fluids));
+            if (interest == null || epoch != interest.Epoch || !interest.Contains(address)) return false;
+            chunks.TryGetValue(address, out var previous);
+            if (previous != null && (previous.Data.Incarnation != incarnation || previous.Data.Revision > revision)) return false;
             for (int i = 0; i < ChunkLayout.Volume; i++)
             {
-                var solid = registry.GetSolid(image.SolidAt(i)); registry.GetFluid(image.FluidAt(i));
-                if (image.FluidAt(i) != 0 && !solid.PermitsFluid) throw new ArgumentException("Replica solid does not permit fluid.");
+                var solid = registry.GetSolid(solids[i]); registry.GetFluid(fluids[i]);
+                if (fluids[i] != 0 && !solid.PermitsFluid) throw new ArgumentException("Replica solid does not permit fluid.");
             }
-            if (previous != null && previous.Data.Revision == image.Revision)
+            if (previous != null && previous.Data.Revision == revision)
             {
                 for (int i = 0; i < ChunkLayout.Volume; i++)
-                    if (previous.Data.SolidAt(i) != image.SolidAt(i) || previous.Data.FluidAt(i) != image.FluidAt(i))
+                    if (previous.Data.SolidAt(i) != solids[i] || previous.Data.FluidAt(i) != fluids[i])
                         throw new ArgumentException("Conflicting replica at the published revision.");
                 return true;
             }
@@ -296,20 +311,20 @@ namespace DigBlocks.Voxels.Runtime
             //instead of counting as a change on every face.
             var faces = new ulong[6];
             byte changed = 0;
-            ComputeFaceHashes(image, faces);
+            ComputeFaceHashes(solids, faces);
             for (int face = 0; face < 6; face++)
             {
                 ulong before = previous?.FaceHashes == null ? EmptyFaceHash : previous.FaceHashes[face];
                 if (before != faces[face]) changed |= (byte)(1 << face);
             }
             //build detached replacement first; failed validation/import leaves the published entity intact.
-            var data = ChunkData.FromChannels(image.Address, image.Incarnation, image.Revision, image.Solids, image.Fluids);
+            var data = ChunkData.FromChannels(address, incarnation, revision, solids, fluids);
             Entity entity = previous?.Entity ?? Entity.Null;
             try
             {
                 if (entity == Entity.Null) entity = manager.CreateEntity(typeof(ResidentChunk));
-                manager.SetComponentData(entity, new ResidentChunk { Address = image.Address, Incarnation = image.Incarnation, Revision = image.Revision });
-                chunks[image.Address] = new Entry { Data = data, Entity = entity, FaceHashes = faces };
+                manager.SetComponentData(entity, new ResidentChunk { Address = address, Incarnation = incarnation, Revision = revision });
+                chunks[address] = new Entry { Data = data, Entity = entity, FaceHashes = faces };
             }
             catch
             {
@@ -318,7 +333,7 @@ namespace DigBlocks.Voxels.Runtime
                 throw;
             }
             previous?.Data.Dispose();
-            ReplicaChanged?.Invoke(image.Address, changed);
+            ReplicaChanged?.Invoke(address, changed);
             return true;
         }
 
@@ -333,7 +348,7 @@ namespace DigBlocks.Voxels.Runtime
             return hash;
         }
 
-        private static void ComputeFaceHashes(ChunkImage image, ulong[] destination)
+        private static void ComputeFaceHashes(ReadOnlySpan<uint> solids, ulong[] destination)
         {
             for (int face = 0; face < 6; face++)
             {
@@ -351,7 +366,7 @@ namespace DigBlocks.Voxels.Runtime
                         case 4: x = 0; y = b; z = a; break;
                         default: x = ChunkLayout.Edge - 1; y = b; z = a; break;
                     }
-                    hash = (hash ^ image.SolidAt(ChunkLayout.Index(new int3(x, y, z)))) * 1099511628211;
+                    hash = (hash ^ solids[ChunkLayout.Index(new int3(x, y, z))]) * 1099511628211;
                 }
                 destination[face] = hash;
             }
@@ -442,7 +457,9 @@ namespace DigBlocks.Voxels.Runtime
                 {
                     if (!item.Capture.IsCompleted) continue;
                     if (!IsLive(item)) { Retire(i); continue; }
-                    var image = ChunkImage.FromOwnedChannels(item.Address, item.Incarnation, item.Revision, item.Capture.CopySolids(), item.Capture.CopyFluids());
+                    uint[] solids = RentCells(), fluids = RentCells();
+                    item.Capture.CopySolids(solids); item.Capture.CopyFluids(fluids);
+                    var image = ChunkImage.FromOwnedChannels(item.Address, item.Incarnation, item.Revision, solids, fluids);
                     item.Capture.Dispose(); item.Capture = null; item.Encoding = true;
                     //no Unity APIs or native chunk allocations are accessed from this worker.
                     if (!ThreadPool.QueueUserWorkItem(_ =>
@@ -450,9 +467,11 @@ namespace DigBlocks.Voxels.Runtime
                         var result = new SnapshotResult { RequestId = item.Id, Address = item.Address, Incarnation = item.Incarnation, Revision = item.Revision };
                         try { result.Payload = ChunkWireCodec.EncodeSnapshot(image); }
                         catch (Exception exception) { result.Error = exception; }
+                        finally { ReturnCells(solids); ReturnCells(fluids); }
                         item.Result = result; item.Done.Set();
                     }))
                     {
+                        ReturnCells(solids); ReturnCells(fluids);
                         item.Result = new SnapshotResult { RequestId = item.Id, Error = new InvalidOperationException("Could not queue snapshot worker.") };
                         item.Done.Set();
                     }
@@ -460,6 +479,14 @@ namespace DigBlocks.Voxels.Runtime
                 if (item.Done.IsSet && !IsLive(item)) Retire(i);
             }
         }
+        private uint[] RentCells() => cellBuffers.TryTake(out var buffer) ? buffer : new uint[ChunkLayout.Volume];
+
+        private void ReturnCells(uint[] buffer)
+        {
+            //bounded so a burst cannot leave the pool holding more than the pipeline can use again.
+            if (cellBuffers.Count < maxSnapshots * 2 + 2) cellBuffers.Add(buffer);
+        }
+
         public bool TryTakeSnapshot(out SnapshotResult result)
         {
             RequireAlive(); result = null;

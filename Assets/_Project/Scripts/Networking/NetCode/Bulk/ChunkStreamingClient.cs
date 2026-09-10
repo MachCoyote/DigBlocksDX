@@ -32,6 +32,10 @@ namespace DigBlocks.Networking.NetCode
         //everything at or below the floor is settled, and the set holds the gaps above it.
         private readonly HashSet<ulong> retired = new();
         private ulong retiredFloor, highestSeen;
+        //applies are strictly sequential and the store copies out before the call returns, so one pair of
+        //buffers serves every snapshot instead of allocating two 128 KiB arrays per chunk.
+        private readonly uint[] scratchSolids = new uint[ChunkLayout.Volume];
+        private readonly uint[] scratchFluids = new uint[ChunkLayout.Volume];
         private byte[] interestRequest;
         private double deadline;
         private int retries;
@@ -116,9 +120,17 @@ namespace DigBlocks.Networking.NetCode
             }
             else
             {
-                image = ChunkWireCodec.DecodeSnapshot(payload, maxSolid, maxFluid);
-                if (!image.Address.Equals(declaration.Address) || image.Incarnation != declaration.Incarnation || image.Revision != declaration.Revision)
+                //snapshots are the whole of a load, so they go straight from the wire into the store
+                //through reused buffers, with no intermediate image to allocate and collect.
+                ChunkWireCodec.DecodeSnapshotInto(payload, maxSolid, maxFluid, scratchSolids, scratchFluids,
+                    out var address, out ulong incarnation, out ulong revision);
+                if (!address.Equals(declaration.Address) || incarnation != declaration.Incarnation || revision != declaration.Revision)
                     throw new FormatException("Snapshot differs from declaration.");
+                if (!store.PublishReplica(declaration.SubscriptionGeneration, address, incarnation, revision, scratchSolids, scratchFluids))
+                { RequestResync(id, now); return; }
+                responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, revision));
+                retries = 0;
+                return;
             }
             if (!store.PublishReplica(declaration.SubscriptionGeneration, image)) { RequestResync(id, now); return; }
             responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, image.Revision));

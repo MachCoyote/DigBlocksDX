@@ -39,6 +39,25 @@ namespace DigBlocks.ChunkProtocol
             return ChunkImage.FromOwnedChannels(address, incarnation, revision, solids, fluids);
         }
 
+        /// <summary>
+        /// Decodes a snapshot into caller-owned buffers. Every cell of both is overwritten, so a caller
+        /// that applies one chunk at a time can reuse a single pair instead of allocating 128 KiB per
+        /// channel per chunk, which is large enough to land on the large object heap.
+        /// </summary>
+        public static void DecodeSnapshotInto(byte[] bytes, uint maxSolidStateId, uint maxFluidStateId,
+            uint[] solids, uint[] fluids, out ChunkAddress address, out ulong incarnation, out ulong revision)
+        {
+            if (solids == null || solids.Length != ChunkLayout.Volume)
+                throw new ArgumentException("Solid destination must hold exactly one chunk.", nameof(solids));
+            if (fluids == null || fluids.Length != ChunkLayout.Volume)
+                throw new ArgumentException("Fluid destination must hold exactly one chunk.", nameof(fluids));
+            using var reader = Open(bytes, MaxSnapshotBytes);
+            ReadHeader(reader, 1, out address, out incarnation, out revision);
+            ReadChannel(reader, maxSolidStateId, solids);
+            ReadChannel(reader, maxFluidStateId, fluids);
+            RequireEnd(reader);
+        }
+
         public static byte[] EncodeDelta(ChunkDelta delta)
         {
             if (delta == null) throw new ArgumentNullException(nameof(delta));
@@ -156,7 +175,7 @@ namespace DigBlocks.ChunkProtocol
             if (occupied != 0) writer.Write((byte)accumulator);
         }
 
-        private static uint[] ReadChannel(BinaryReader reader, uint maxState)
+        private static void ReadChannel(BinaryReader reader, uint maxState, uint[] destination)
         {
             Require(reader, 1);
             byte mode = reader.ReadByte();
@@ -165,20 +184,19 @@ namespace DigBlocks.ChunkProtocol
                 Require(reader, 4);
                 uint value = reader.ReadUInt32();
                 if (value > maxState) throw Invalid("Unknown uniform state.");
-                var values = new uint[ChunkLayout.Volume];
-                if (value != 0) for (int i = 0; i < values.Length; i++) values[i] = value;
-                return values;
+                //the destination may be reused, so a uniform channel must overwrite every cell.
+                for (int i = 0; i < destination.Length; i++) destination[i] = value;
+                return;
             }
             if (mode == 2)
             {
                 Require(reader, ChunkLayout.Volume * 4);
-                var values = new uint[ChunkLayout.Volume];
-                for (int i = 0; i < values.Length; i++)
+                for (int i = 0; i < destination.Length; i++)
                 {
-                    values[i] = reader.ReadUInt32();
-                    if (values[i] > maxState) throw Invalid("Unknown direct state.");
+                    destination[i] = reader.ReadUInt32();
+                    if (destination[i] > maxState) throw Invalid("Unknown direct state.");
                 }
-                return values;
+                return;
             }
             if (mode != 1) throw Invalid("Unknown channel encoding.");
             Require(reader, 5);
@@ -194,11 +212,10 @@ namespace DigBlocks.ChunkProtocol
                 palette[i] = reader.ReadUInt32();
                 if (palette[i] > maxState || !distinct.Add(palette[i])) throw Invalid("Unknown or duplicate palette state.");
             }
-            var result = new uint[ChunkLayout.Volume];
             ulong accumulator = 0;
             int occupied = 0;
             uint mask = (1u << bits) - 1;
-            for (int i = 0; i < result.Length; i++)
+            for (int i = 0; i < destination.Length; i++)
             {
                 while (occupied < bits)
                 {
@@ -207,12 +224,18 @@ namespace DigBlocks.ChunkProtocol
                 }
                 uint index = (uint)accumulator & mask;
                 if (index >= count) throw Invalid("Palette index outside palette.");
-                result[i] = palette[index];
+                destination[i] = palette[index];
                 accumulator >>= bits;
                 occupied -= bits;
             }
             if (accumulator != 0) throw Invalid("Nonzero packed padding.");
-            return result;
+        }
+
+        private static uint[] ReadChannel(BinaryReader reader, uint maxState)
+        {
+            var values = new uint[ChunkLayout.Volume];
+            ReadChannel(reader, maxState, values);
+            return values;
         }
 
         private static int BitsFor(int count)

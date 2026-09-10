@@ -200,6 +200,10 @@ namespace DigBlocks.Voxels
         }
         public uint[] CopySolids() { Handle.Complete(); return Solids.ToArray(); }
         public uint[] CopyFluids() { Handle.Complete(); return Fluids.ToArray(); }
+        //overloads that fill a caller-owned buffer, so the snapshot pipeline can recycle its copies
+        //instead of allocating two 128 KiB arrays for every chunk it encodes.
+        public void CopySolids(uint[] destination) { Handle.Complete(); NativeArray<uint>.Copy(Solids, destination); }
+        public void CopyFluids(uint[] destination) { Handle.Complete(); NativeArray<uint>.Copy(Fluids, destination); }
         public void Dispose()
         {
             Handle.Complete();

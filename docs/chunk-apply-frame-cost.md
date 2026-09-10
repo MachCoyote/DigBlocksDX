@@ -50,29 +50,46 @@ that neither retain nor mutate, and `ChunkImage.FromOwnedChannels` wraps buffers
 built instead of cloning them. Decoding a chunk previously allocated two 128 KiB arrays and then
 immediately cloned both; publishing cloned them a third time.
 
+**Reused buffers instead of per-chunk garbage.** Everything above still allocated two `uint[32768]`
+per chunk, each 128 KiB and therefore on the large object heap, and the remaining frame spikes were
+all gen2 collections. Three changes removed that churn:
+
+- `ChunkWireCodec.DecodeSnapshotInto` decodes into caller-owned buffers, and `PublishReplica` gained
+  a span overload, so a snapshot goes from the wire into the store with no intermediate `ChunkImage`
+  at all. Applies are strictly sequential and the store copies out before the call returns, so the
+  client needs exactly one pair of buffers rather than a pool.
+- The server's snapshot encoder rents its two managed copies from a small bounded pool and the
+  worker returns them when it finishes. The copies stay, because the deliberate invariant that the
+  encode worker touches no native chunk memory is worth keeping.
+- `PaletteChannel.FromValues` keeps its palette-building scratch in `[ThreadStatic]` fields instead
+  of allocating roughly 192 KiB per chunk. Each thread that loads a channel holds one set for its
+  lifetime; today that is only the thread applying chunks.
+
 ## Measured outcome
 
-| Metric | Before | After |
-| --- | --- | --- |
-| `FromChannels` | 6.16 ms | 1.20 ms |
-| decode + publish per chunk | 7.37 ms | 1.99 ms |
-| Mean client tick over a 245-chunk load | — | 2.09 ms |
-| Worst client tick with no GC | ~59 ms | under 8 ms |
+| Metric | Before | After bulk load | After reuse |
+| --- | --- | --- | --- |
+| `FromChannels` | 6.16 ms | 1.20 ms | 1.20 ms |
+| decode + publish per chunk | 7.37 ms | 1.99 ms | — |
+| Mean client tick over a 245-chunk load | — | 2.09 ms | 1.70 ms |
+| Worst client tick | ~59 ms | 16.30 ms | 5.07 ms |
+| Gen2 collections across the load | — | one per spike | 4, none on a slow tick |
+
+The worst frame during a full 245-chunk load is now 5.07 ms against a 16.6 ms budget, measured in
+the editor with native collection safety checks on; a player build has more headroom still.
+Convergence is unchanged at about 125 ticks.
 
 `AppliesPerTick` was swept over a full 245-chunk load. A budget of 2 converges in the same 125
 ticks as 3 or 4 while doing the least work per tick, so it is the default. A budget of 1 halves
 the peak load rate (249 ticks) for a smaller gain, and higher budgets only make frames lumpier
 without loading faster, because the transfer stage is the limit at that point.
 
-## Remaining cost: garbage collection
+## On garbage collection
 
-Every remaining slow tick coincides with a gen2 collection. Ticks without one stay under 8 ms;
-ticks with one run 10–22 ms. The churn is inherent to `DecodeSnapshot` returning two
-`uint[32768]` buffers per chunk, each 128 KiB and therefore allocated on the large object heap.
-
-Worth noting for whatever is done next: moving decode to a worker thread would not fix this.
-The collection is stop-the-world, so it stalls the main thread wherever the allocation happened.
-Removing the intermediate buffers, or pooling them, is what removes the spike.
+Before buffer reuse, every slow tick coincided with a gen2 collection: ticks without one stayed
+under 8 ms, ticks with one ran 10-22 ms. Worth recording why moving decode to a worker thread was
+not the answer to that: the collection is stop-the-world, so it stalls the main thread wherever the
+allocation happened. Removing the allocations is what removed the spike.
 
 ## Main files
 
@@ -83,6 +100,8 @@ Removing the intermediate buffers, or pooling them, is what removes the spike.
 | `Networking/Chunks/ChunkImage.cs` | Span views and owned-buffer construction |
 | `Networking/NetCode/Bulk/ChunkStreamingClient.cs` | Apply queue and per-tick budget |
 | `Networking/NetCode/Bulk/ChunkStreamingSettings.cs` | Authored apply budget |
+| `Networking/Chunks/ChunkWireCodec.cs` | Decode into caller-owned buffers |
+| `Voxels/Runtime/ResidentChunkStore.cs` | Span publish overload and the encoder buffer pool |
 
 Paths are relative to `Assets/_Project/Scripts`.
 
@@ -103,8 +122,11 @@ Paths are relative to `Assets/_Project/Scripts`.
 
 ## Deferred work
 
-- Moving decode and channel construction off the main thread. Now worth less than it looked:
-  it removes about 2 ms of main-thread work per chunk but not the GC pauses.
-- Making the wire format carry the storage layout directly, so applying a chunk is a palette read
-  plus a memcpy. This removes the intermediate buffers entirely and with them the GC spikes, which
-  makes it the stronger of the two remaining options for smoothness.
+Both remaining options are now throughput work rather than smoothness work, since the worst frame
+already fits comfortably inside the budget.
+
+- Moving decode and channel construction off the main thread would free roughly 1.7 ms of main
+  thread per tick, which matters only if the apply budget becomes the limit on load speed.
+- Making the wire format carry the storage layout directly would make applying a chunk a palette
+  read plus a memcpy, removing most of the remaining per-chunk work. Larger change, and it
+  constrains the protocol to the storage representation.

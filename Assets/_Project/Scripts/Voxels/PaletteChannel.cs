@@ -10,6 +10,10 @@ namespace DigBlocks.Voxels
     public struct PaletteChannel : IDisposable
     {
         private const int DirectThreshold = 4096;
+        [ThreadStatic] private static ushort[] scratchEntries;
+        [ThreadStatic] private static byte[] scratchPacked;
+        [ThreadStatic] private static Dictionary<uint, int> scratchIndices;
+        [ThreadStatic] private static List<uint> scratchOrder;
         private NativeList<uint> palette;
         private NativeList<byte> cells;
         private NativeParallelHashMap<uint, int> lookup;
@@ -33,11 +37,13 @@ namespace DigBlocks.Voxels
             if (values.Length != ChunkLayout.Volume)
                 throw new ArgumentException("A channel load requires exactly one chunk of cells.", nameof(values));
 
-            var indices = new Dictionary<uint, int>();
-            var order = new List<uint>();
+            //scratch is per thread and reused for the life of that thread: a load runs this once per
+            //channel per chunk, and freshly allocating it each time was the bulk of the remaining garbage.
+            var indices = scratchIndices ??= new Dictionary<uint, int>();
+            var order = scratchOrder ??= new List<uint>();
             //a chunk cannot hold more distinct values than cells, so an entry always fits a ushort.
-            //At 64 KiB this stays below the large-object threshold and is collected cheaply.
-            var entries = new ushort[ChunkLayout.Volume];
+            var entries = scratchEntries ??= new ushort[ChunkLayout.Volume];
+            indices.Clear(); order.Clear();
             for (int i = 0; i < values.Length; i++)
             {
                 if (!indices.TryGetValue(values[i], out int entry))
@@ -65,7 +71,9 @@ namespace DigBlocks.Voxels
                 : order.Count <= DirectThreshold ? ChannelStorage.Palette16 : ChannelStorage.Direct;
             int width = channel.Storage == ChannelStorage.Palette8 ? 1 : channel.Storage == ChannelStorage.Palette16 ? 2 : 4;
 
-            var packed = new byte[ChunkLayout.Volume * width];
+            //sized for the widest storage class once, then only the leading width bytes per cell are used.
+            var packed = scratchPacked ??= new byte[ChunkLayout.Volume * 4];
+            int packedLength = ChunkLayout.Volume * width;
             if (channel.Storage == ChannelStorage.Direct)
                 for (int i = 0; i < values.Length; i++)
                 {
@@ -80,9 +88,9 @@ namespace DigBlocks.Voxels
                 for (int i = 0; i < entries.Length; i++)
                 { packed[i * 2] = (byte)entries[i]; packed[i * 2 + 1] = (byte)(entries[i] >> 8); }
 
-            channel.cells = new NativeList<byte>(packed.Length, Allocator.Persistent);
-            channel.cells.ResizeUninitialized(packed.Length);
-            channel.cells.AsArray().CopyFrom(packed);
+            channel.cells = new NativeList<byte>(packedLength, Allocator.Persistent);
+            channel.cells.ResizeUninitialized(packedLength);
+            NativeArray<byte>.Copy(packed, 0, channel.cells.AsArray(), 0, packedLength);
 
             //Direct storage holds raw values and needs no reverse map; the promote path disposes it too.
             if (channel.Storage == ChannelStorage.Direct) channel.lookup = default;
