@@ -73,7 +73,16 @@ namespace DigBlocks.Voxels.Generation
         private readonly object contextGate = new object();
         private readonly Stack<GenerationContext> contextPool = new Stack<GenerationContext>();
         private readonly int slotCount;
+        private long plansComputed, plansReused;
         private bool disposed;
+
+        /// <summary>
+        /// How many column plans have been computed, and how many were answered by a worker's kept
+        /// plan instead. A plan does not depend on the chunk's Y, so a vertical stack of chunks shares
+        /// one; these counters are how that is measured rather than assumed.
+        /// </summary>
+        public long PlansComputed => System.Threading.Interlocked.Read(ref plansComputed);
+        public long PlansReused => System.Threading.Interlocked.Read(ref plansReused);
 
         internal TerrainGenerator(string id, string displayName, GeneratorBuildContext context, IReadOnlyList<WorldLayer> layers)
         {
@@ -192,7 +201,12 @@ namespace DigBlocks.Voxels.Generation
                         if ((mask & (1UL << index)) == 0) continue;
                         var layer = compiled[index];
                         var plan = context.Plan(index);
-                        if (!plan.Describes(chunkX, chunkZ)) layer.Plan(plan, chunkX, chunkZ, context.Scratch);
+                        if (plan.Describes(chunkX, chunkZ)) System.Threading.Interlocked.Increment(ref plansReused);
+                        else
+                        {
+                            layer.Plan(plan, chunkX, chunkZ, context.Scratch);
+                            System.Threading.Interlocked.Increment(ref plansComputed);
+                        }
                         //shape, then carve what the shape made, then decide what fills the space that
                         //is left. Reordering any of these changes what the world looks like.
                         layer.Fill(plan, minY, solidBuffer);
