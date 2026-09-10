@@ -117,37 +117,16 @@ namespace DigBlocks.Voxels.Generation
         }
     }
 
-    /// <summary>
-    /// Holds the one Burst compilation of the kernel. Compiling a function pointer is not free and is
-    /// not something a generation worker should discover it needs, so this is forced on the main
-    /// thread when a generator is built.
-    /// </summary>
-    public static class NoiseKernelDispatch
+    /// <summary>Holds the one Burst compilation of the noise kernel.</summary>
+    public static unsafe class NoiseKernelDispatch
     {
-        private static readonly object Gate = new object();
-        private static FunctionPointer<NoiseEvaluate> compiled;
-        private static bool ready;
+        private static readonly BurstEntryPoint<NoiseEvaluate> Entry =
+            new BurstEntryPoint<NoiseEvaluate>(NoiseKernel.Evaluate);
 
-        public static FunctionPointer<NoiseEvaluate> Compiled
-        {
-            get
-            {
-                if (ready) return compiled;
-                Warm();
-                return compiled;
-            }
-        }
+        public static FunctionPointer<NoiseEvaluate> Compiled => Entry.Compiled;
 
         /// <summary>Compiles the kernel now, on the calling thread. Safe to call more than once.</summary>
-        public static void Warm()
-        {
-            lock (Gate)
-            {
-                if (ready) return;
-                unsafe { compiled = BurstCompiler.CompileFunctionPointer<NoiseEvaluate>(NoiseKernel.Evaluate); }
-                ready = true;
-            }
-        }
+        public static void Warm() => Entry.Warm();
     }
 
     /// <summary>
