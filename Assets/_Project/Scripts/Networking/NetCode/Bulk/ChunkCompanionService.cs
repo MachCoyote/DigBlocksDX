@@ -47,6 +47,28 @@ namespace DigBlocks.Networking.NetCode
             return (int)Math.Clamp(chunks + chunks / 2 + 16, 1, 65536);
         }
 
+        /// <summary>
+        /// Single player only, and off unless something sets it. Consulted per chunk, so flipping it
+        /// changes how the next chunk arrives. The wire path stays the default deliberately: it is the
+        /// one multiplayer depends on, and ordinary play is what exercises it.
+        /// </summary>
+        public Func<bool> DirectChunkDelivery { get; set; }
+
+        public long DirectChunkDeliveries => serverEndpoint?.DirectChunkDeliveries ?? 0;
+
+        private bool DirectDeliveryEnabled() =>
+            session.Role == NetworkSessionRole.ClientAndServer && (DirectChunkDelivery?.Invoke() ?? false);
+
+        //the bridge has to live here because this is the only place holding both stores; the server's
+        //endpoint knows only its own world.
+        private bool DeliverDirect(ulong peerId, ulong epoch, ChunkAddress address, ulong incarnation,
+            ulong revision, PackedChannelData solids, PackedChannelData fluids)
+        {
+            var replica = clientStore?.Store;
+            if (replica == null || replica.IsDisposed) return false;
+            return replica.PublishReplica(epoch, address, incarnation, revision, solids, fluids);
+        }
+
         public bool ClientDataReady => clientEndpoint?.DataReady ?? false;
         public long SentChunkBytes => serverEndpoint?.SentChunkBytes ?? 0;
         public long AppliedChunkAcknowledgements => serverEndpoint?.AppliedChunkAcknowledgements ?? 0;
@@ -104,7 +126,12 @@ namespace DigBlocks.Networking.NetCode
                     }
                     serverSystem = world.GetOrCreateSystemManaged<BulkCompanionSystem>();
                     if (serverSystem.Endpoint != null) throw new InvalidOperationException("World already has a companion endpoint.");
-                    try { serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending, streamingOptions, authoritativeSource); }
+                    try
+                    {
+                        serverEndpoint = new BulkCompanionEndpoint(world, true, ipc, port, registry, bindingTimeout, maxPending,
+                            streamingOptions, authoritativeSource,
+                            ipc ? DirectDeliveryEnabled : null, ipc ? DeliverDirect : null);
+                    }
                     catch (InvalidOperationException) { throw new NetworkSessionException(NetworkFailure.ListenFailed); }
                     serverSystem.Endpoint = serverEndpoint;
                 }

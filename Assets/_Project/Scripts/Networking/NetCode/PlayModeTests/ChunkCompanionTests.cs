@@ -27,6 +27,52 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         private static readonly int DisjointResidency = (int)ChunkInterest.CountFor(0, 1);
         private readonly List<GameHost> hosts = new();
         private readonly NullLogger logger = new();
+        //Single player runs both worlds in one process, so a chunk can be handed straight across rather
+        //than encoded, sliced, reassembled and decoded. The switch is read per chunk, so what has to
+        //hold is that it decides how the next chunk arrives and that both routes land the same data.
+        [UnityTest]
+        public IEnumerator DirectDeliveryBypassesTheCodecAndTheSwitchTakesEffectPerChunk() => UniTask.ToCoroutine(async () =>
+        {
+            var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
+            var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
+            var session = new NetCodeSession(NetworkSessionRole.ClientAndServer, new NetworkSessionOptions("127.0.0.1", 0, 1), () => client.World, () => server.World, logger, () => 140);
+            var bulk = new ChunkCompanionService(session);
+            bool direct = true;
+            bulk.DirectChunkDelivery = () => direct;
+            await Host(server, client, session, bulk).StartAsync(CancellationToken.None);
+            await Until(() => bulk.ClientDataReady);
+
+            var source = server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            var replica = client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store;
+            Assert.That(replica.Count, Is.EqualTo(DefaultResidency));
+            Assert.That(bulk.DirectChunkDeliveries, Is.EqualTo(DefaultResidency));
+            Assert.That(bulk.SentChunkSnapshots, Is.Zero, "Nothing should have been encoded.");
+            Assert.That(bulk.SentChunkDeltas, Is.Zero);
+
+            //the data has to be the chunk itself, not merely the right shape.
+            var address = new ChunkAddress(1, default);
+            using (var lease = source.Acquire(address))
+            {
+                lease.Apply(new[] { new CellEdit(11, 1, 0) });
+                await Until(() => replica.TryReadReplica(address, out var image) && image.Revision == lease.Revision);
+                Assert.That(replica.TryReadReplica(address, out var delivered), Is.True);
+                for (int i = 0; i < ChunkLayout.Volume; i++)
+                {
+                    Assert.That(delivered.SolidAt(i), Is.EqualTo(lease.SolidAt(i)));
+                    Assert.That(delivered.FluidAt(i), Is.EqualTo(lease.FluidAt(i)));
+                }
+            }
+            long deliveredSoFar = bulk.DirectChunkDeliveries;
+
+            //turning it off mid-session must route the chunks that arrive next over the wire instead.
+            direct = false;
+            Assert.That(bulk.SetServerInterest(session.LocalPeerId, new ChunkAddress(1, new Unity.Mathematics.int3(0, 4, 0)), 0, 1), Is.True);
+            await Until(() => replica.InterestEpoch == 2 && bulk.ClientDataReady);
+            Assert.That(bulk.SentChunkSnapshots, Is.EqualTo(DisjointResidency), "The wire path should have carried these.");
+            Assert.That(bulk.DirectChunkDeliveries, Is.EqualTo(deliveredSoFar), "Nothing more should have gone direct.");
+            Assert.That(replica.Count, Is.EqualTo(DisjointResidency));
+        });
+
         [UnityTest]
         public IEnumerator IpcBindsAfterAdmissionOwnsWorldStoresAndStopsBeforeWorlds() => UniTask.ToCoroutine(async () =>
         {

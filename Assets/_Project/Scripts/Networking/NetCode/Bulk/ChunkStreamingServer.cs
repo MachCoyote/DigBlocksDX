@@ -36,6 +36,14 @@ namespace DigBlocks.Networking.NetCode
         }
     }
 
+    /// <summary>
+    /// Hands one chunk straight to a client store that shares this process. Returns false when the
+    /// client cannot take it yet, which means it has not caught up with the interest declaration and
+    /// the chunk should simply be offered again.
+    /// </summary>
+    internal delegate bool ChunkDirectDelivery(ulong peerId, ulong epoch, ChunkAddress address,
+        ulong incarnation, ulong revision, PackedChannelData solids, PackedChannelData fluids);
+
     internal sealed class ChunkStreamingServer : IDisposable
     {
         private readonly ResidentChunkStore store;
@@ -44,6 +52,11 @@ namespace DigBlocks.Networking.NetCode
         private readonly Action<ulong> fail;
         private readonly IAuthoritativeChunkSource source;
         private readonly Func<ulong, int> sliceCapacity;
+        //optional single-player shortcut. Consulted per chunk, so flipping it changes how the next
+        //chunk arrives rather than requiring a restart, and every other stage is left alone.
+        private readonly Func<bool> directEnabled;
+        private readonly ChunkDirectDelivery deliverDirect;
+        private readonly PackedChannelData directSolids = new(), directFluids = new();
         private readonly Dictionary<ulong, Peer> peers = new();
         private readonly List<ulong> order = new();
         private readonly List<Transfer> expired = new();
@@ -90,11 +103,15 @@ namespace DigBlocks.Networking.NetCode
         }
 
         public ChunkStreamingServer(ResidentChunkStore store, ChunkStreamingOptions options, Func<ulong, byte[], bool> send, Action<ulong> fail,
-            IAuthoritativeChunkSource source = null, Func<ulong, int> sliceCapacity = null)
+            IAuthoritativeChunkSource source = null, Func<ulong, int> sliceCapacity = null,
+            Func<bool> directEnabled = null, ChunkDirectDelivery deliverDirect = null)
         {
             this.store = store; this.options = options; this.send = send; this.fail = fail; this.source = source;
             this.sliceCapacity = sliceCapacity;
+            this.directEnabled = directEnabled; this.deliverDirect = deliverDirect;
         }
+
+        public long DirectDeliveries { get; private set; }
 
         public bool Add(ulong id, double now)
         {
@@ -211,6 +228,16 @@ namespace DigBlocks.Networking.NetCode
                 //back round to it once PumpLoads has adopted the result.
                 if (store.RequestLoad(lease, source) != ChunkLoadState.Loaded) continue;
                 if (peer.Baselines[index] == lease.Revision) continue;
+                if (deliverDirect != null && directEnabled != null && directEnabled())
+                {
+                    //nothing is encoded, sliced, reassembled or decoded: the client store is a few
+                    //metres away in memory and takes the chunk in the layout it is already held in.
+                    //Advancing the baseline here is what keeps deltas working afterwards.
+                    ulong revision = store.CopyPacked(lease, directSolids, directFluids);
+                    if (deliverDirect(peer.Id, peer.Interest.Epoch, lease.Address, lease.Incarnation, revision, directSolids, directFluids))
+                    { peer.Baselines[index] = revision; DirectDeliveries++; }
+                    continue;
+                }
                 var transfer = new Transfer
                 {
                     Owner = peer, LeaseIndex = index, Address = lease.Address, Incarnation = lease.Incarnation,

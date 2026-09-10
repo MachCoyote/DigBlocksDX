@@ -15,7 +15,8 @@ namespace DigBlocks.Client.Debugging
             new DebugToggle(DebugToggleIds.Wireframe, "Wireframe View", Key.F8, "Off", "Overlay", "Only"),
             new DebugToggle(DebugToggleIds.Fullbright, "Fullbright", Key.F7),
             new DebugToggle(DebugToggleIds.Overdraw, "Highlight Overdraw", Key.F6, "Off", "All Layers", "Shaded Only"),
-            new DebugToggle(DebugToggleIds.SecondaryCameraCulling, "Secondary Camera Culling", Key.F5, "Own View", "Mirror Main")
+            new DebugToggle(DebugToggleIds.SecondaryCameraCulling, "Secondary Camera Culling", Key.F5, "Own View", "Mirror Main"),
+            new DebugToggle(DebugToggleIds.DirectChunkDelivery, "Direct Chunk Delivery", Key.F4, "Wire Path", "Direct")
         };
     }
 }

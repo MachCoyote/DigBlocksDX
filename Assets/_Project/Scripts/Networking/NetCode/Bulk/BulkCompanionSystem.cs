@@ -90,8 +90,11 @@ namespace DigBlocks.Networking.NetCode
         public bool RequestInterest(ChunkAddress anchor) =>
             !disposed && !server && streamingClient != null && streamingClient.RequestInterest(anchor);
 
+        public long DirectChunkDeliveries => streamingServer?.DirectDeliveries ?? 0;
+
         public BulkCompanionEndpoint(World world, bool server, bool ipc, ushort port, BlockRegistry registry, double timeout, int maxPending,
-            ChunkStreamingOptions streamingOptions, IAuthoritativeChunkSource source = null)
+            ChunkStreamingOptions streamingOptions, IAuthoritativeChunkSource source = null,
+            Func<bool> directEnabled = null, ChunkDirectDelivery deliverDirect = null)
         {
             this.world = world; this.server = server; this.ipc = ipc; this.registry = registry; this.timeout = timeout; this.maxPending = maxPending;
             this.streamingOptions = streamingOptions;
@@ -107,7 +110,8 @@ namespace DigBlocks.Networking.NetCode
                     (id, packet) => peers.TryGetValue(id, out var peer) && Live(Context, id, peer) && driver.TrySend(peer.Connection, packet),
                     id => FailPeer(id, NetworkFailure.ChunkChannelFailed), source,
                     //slice to what this connection's pipeline actually accepts; the path MTU decides it.
-                    id => peers.TryGetValue(id, out var peer) && peer.Connection.IsCreated ? driver.PayloadCapacity(peer.Connection) : 0);
+                    id => peers.TryGetValue(id, out var peer) && peer.Connection.IsCreated ? driver.PayloadCapacity(peer.Connection) : 0,
+                    directEnabled, deliverDirect);
             }
             else { State = ChunkConnectionState.AwaitingOffer; clientDeadline = Now + timeout; }
         }

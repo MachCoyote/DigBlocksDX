@@ -130,6 +130,19 @@ namespace DigBlocks.Voxels.Runtime
         /// expansion to a worker thread and pick the result up a tick or more later; the copy is now
         /// small enough that the latency cost far outweighed the thread.
         /// </summary>
+        /// <summary>
+        /// Copies the leased chunk out in the layout it is stored in, and reports the revision copied.
+        /// This is what single-player direct delivery hands to the client store.
+        /// </summary>
+        public ulong CopyPacked(ChunkLease lease, PackedChannelData solids, PackedChannelData fluids)
+        {
+            Validate(lease);
+            if (solids == null) throw new ArgumentNullException(nameof(solids));
+            if (fluids == null) throw new ArgumentNullException(nameof(fluids));
+            lease.Data.CopyPacked(solids, fluids);
+            return lease.Data.Revision;
+        }
+
         public byte[] EncodeSnapshot(ChunkLease lease)
         {
             Validate(lease);

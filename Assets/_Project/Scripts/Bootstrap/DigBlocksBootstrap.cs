@@ -2,6 +2,7 @@ using Cysharp.Threading.Tasks;
 using DigBlocks.Bootstrap.Session;
 using DigBlocks.Client.Flow;
 using DigBlocks.Client.UI;
+using DigBlocks.Core.Diagnostics;
 using DigBlocks.Core.Hosting;
 using DigBlocks.Core.Launch;
 using DigBlocks.Core.Session;
@@ -227,6 +228,11 @@ namespace DigBlocks.Bootstrap
                 if (service is ClientRuntime c) client = c;
                 if (service is ChunkCompanionService chunkCompanion) companion = chunkCompanion;
             }
+            //single player only, and off until the debug menu turns it on; the lambda reads the switch
+            //each time a chunk is offered, so flipping it takes effect on the next chunk.
+            if (companion != null)
+                companion.DirectChunkDelivery = () =>
+                    presentation?.DebugOptions?.IsEnabled(DebugToggleIds.DirectChunkDelivery) ?? false;
             if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
                 services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
                     () => presentation?.GameplayInputAvailable ?? false, presentation?.DebugOptions,
