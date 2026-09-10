@@ -157,7 +157,14 @@ namespace DigBlocks.Networking.NetCode
                 else ClientEvent(item);
             }
             if (disposed) return;
-            streamingServer?.Tick(Now); streamingClient?.Tick(Now);
+            //applying a chunk now happens in the client tick, so it needs the same protocol-failure
+            //handling that receiving one has.
+            try { streamingServer?.Tick(Now); streamingClient?.Tick(Now); }
+            catch (Exception exception) when (exception is FormatException || exception is ArgumentException || exception is InvalidOperationException)
+            {
+                if (server) Dispose(); else FailClient(NetworkFailure.ChunkChannelFailed);
+                return;
+            }
             if (disposed || !server) return;
             removedConnections.Clear();
             foreach (var pair in pending) if (Now >= pair.Value) removedConnections.Add(pair.Key);

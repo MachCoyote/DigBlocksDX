@@ -66,7 +66,10 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             using var client = new ChunkStreamingClient(store, registry, new ChunkStreamingOptions(), packet => { replies.Add(packet); return true; }, () => Assert.Fail(), 0);
             client.Receive(ChunkTransferFrames.EncodeInterest(new ChunkInterest(1, Address, 0, 0)), 0);
             byte[] bad = ChunkWireCodec.EncodeSnapshot(Image(new ChunkAddress(2, default)));
-            Assert.Throws<FormatException>(() => Deliver(client, new TransferStart(1, 1, Address, 1, 1, bad.Length, false), bad, 0));
+            //applying is budgeted per tick now, so a payload that disagrees with its declaration is
+            //rejected when the client gets round to decoding it rather than as the last slice lands.
+            Deliver(client, new TransferStart(1, 1, Address, 1, 1, bad.Length, false), bad, 0);
+            Assert.Throws<FormatException>(() => client.Tick(0));
             Assert.That(store.Count, Is.Zero); Assert.That(replies, Is.Empty);
             byte[] delta = ChunkWireCodec.EncodeDelta(new ChunkDelta(Address, 1, 1, 2, new[] { new ChunkCellUpdate(0, 1, 0) }));
             Deliver(client, new TransferStart(2, 1, Address, 1, 2, delta.Length, true), delta, 0);

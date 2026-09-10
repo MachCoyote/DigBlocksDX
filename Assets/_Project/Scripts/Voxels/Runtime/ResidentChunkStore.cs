@@ -303,7 +303,7 @@ namespace DigBlocks.Voxels.Runtime
                 if (before != faces[face]) changed |= (byte)(1 << face);
             }
             //build detached replacement first; failed validation/import leaves the published entity intact.
-            var data = ChunkData.FromChannels(image.Address, image.Incarnation, image.Revision, image.CopySolids(), image.CopyFluids());
+            var data = ChunkData.FromChannels(image.Address, image.Incarnation, image.Revision, image.Solids, image.Fluids);
             Entity entity = previous?.Entity ?? Entity.Null;
             try
             {
@@ -369,7 +369,7 @@ namespace DigBlocks.Voxels.Runtime
             image = null;
             if (!TryCaptureReplica(address, out var pending)) return false;
             using var capture = pending;
-            image = new ChunkImage(address, capture.Incarnation, capture.Revision, capture.CopySolids(), capture.CopyFluids());
+            image = ChunkImage.FromOwnedChannels(address, capture.Incarnation, capture.Revision, capture.CopySolids(), capture.CopyFluids());
             return true;
         }
 
@@ -442,7 +442,7 @@ namespace DigBlocks.Voxels.Runtime
                 {
                     if (!item.Capture.IsCompleted) continue;
                     if (!IsLive(item)) { Retire(i); continue; }
-                    var image = new ChunkImage(item.Address, item.Incarnation, item.Revision, item.Capture.CopySolids(), item.Capture.CopyFluids());
+                    var image = ChunkImage.FromOwnedChannels(item.Address, item.Incarnation, item.Revision, item.Capture.CopySolids(), item.Capture.CopyFluids());
                     item.Capture.Dispose(); item.Capture = null; item.Encoding = true;
                     //no Unity APIs or native chunk allocations are accessed from this worker.
                     if (!ThreadPool.QueueUserWorkItem(_ =>

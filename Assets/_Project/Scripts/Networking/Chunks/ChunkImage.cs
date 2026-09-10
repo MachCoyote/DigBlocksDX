@@ -14,6 +14,9 @@ namespace DigBlocks.ChunkProtocol
         private readonly uint[] fluids;
 
         public ChunkImage(ChunkAddress address, ulong incarnation, ulong revision, uint[] solids, uint[] fluids)
+            : this(address, incarnation, revision, solids, fluids, false) { }
+
+        private ChunkImage(ChunkAddress address, ulong incarnation, ulong revision, uint[] solids, uint[] fluids, bool adopt)
         {
             if (incarnation == 0) throw new ArgumentOutOfRangeException(nameof(incarnation));
             if (revision == 0) throw new ArgumentOutOfRangeException(nameof(revision));
@@ -24,14 +27,26 @@ namespace DigBlocks.ChunkProtocol
             Address = address;
             Incarnation = incarnation;
             Revision = revision;
-            this.solids = (uint[])solids.Clone();
-            this.fluids = (uint[])fluids.Clone();
+            this.solids = adopt ? solids : (uint[])solids.Clone();
+            this.fluids = adopt ? fluids : (uint[])fluids.Clone();
         }
+
+        /// <summary>
+        /// Wraps buffers the caller has just built and will never touch again, skipping the defensive copy
+        /// the constructor makes; decoding a chunk otherwise clones 128 KiB per channel straight back.
+        /// The caller must not retain or mutate either array afterwards.
+        /// </summary>
+        public static ChunkImage FromOwnedChannels(ChunkAddress address, ulong incarnation, ulong revision, uint[] solids, uint[] fluids) =>
+            new ChunkImage(address, incarnation, revision, solids, fluids, true);
 
         public uint SolidAt(int index) => solids[index];
         public uint FluidAt(int index) => fluids[index];
         public uint[] CopySolids() => (uint[])solids.Clone();
         public uint[] CopyFluids() => (uint[])fluids.Clone();
+
+        //read-only views for consumers that neither retain nor mutate, avoiding the copy above.
+        public ReadOnlySpan<uint> Solids => solids;
+        public ReadOnlySpan<uint> Fluids => fluids;
     }
 
     public readonly struct ChunkCellUpdate
@@ -92,7 +107,8 @@ namespace DigBlocks.ChunkProtocol
                 solids[update.Index] = update.Solid;
                 fluids[update.Index] = update.Fluid;
             }
-            return new ChunkImage(Address, Incarnation, ResultRevision, solids, fluids);
+            //both buffers were just built here, so hand them over rather than cloning again.
+            return ChunkImage.FromOwnedChannels(Address, Incarnation, ResultRevision, solids, fluids);
         }
     }
 }

@@ -18,9 +18,10 @@ namespace DigBlocks.Networking.NetCode
         public uint WorldId { get; }
         public int PeerWindow { get; }
         public int SnapshotWorkers { get; }
+        public int AppliesPerTick { get; }
         public ChunkStreamingOptions(int horizontalRadius = 1, int verticalRadius = 0,
             int globalBytesPerTick = 262144, int peerBytesPerTick = 131072, int maxPayloads = 64, double progressTimeout = 10,
-            uint worldId = 1, int peerWindow = 8, int snapshotWorkers = 16)
+            uint worldId = 1, int peerWindow = 8, int snapshotWorkers = 16, int appliesPerTick = 2)
         {
             if (worldId == 0) throw new ArgumentOutOfRangeException(nameof(worldId));
             _ = new ChunkInterest(1, new ChunkAddress(worldId, default), horizontalRadius, verticalRadius);
@@ -31,10 +32,11 @@ namespace DigBlocks.Networking.NetCode
             //a peer can never hold more in flight than the shared payload budget allows.
             peerWindow = Math.Min(peerWindow, maxPayloads);
             if (snapshotWorkers < 1 || snapshotWorkers > 64) throw new ArgumentOutOfRangeException(nameof(snapshotWorkers));
+            if (appliesPerTick < 1 || appliesPerTick > 64) throw new ArgumentOutOfRangeException(nameof(appliesPerTick));
             if (!(progressTimeout >= 1 && progressTimeout <= 120)) throw new ArgumentOutOfRangeException(nameof(progressTimeout));
             HorizontalRadius = horizontalRadius; VerticalRadius = verticalRadius; GlobalBytesPerTick = globalBytesPerTick;
             PeerBytesPerTick = peerBytesPerTick; MaxPayloads = maxPayloads; ProgressTimeout = progressTimeout; WorldId = worldId;
-            PeerWindow = peerWindow; SnapshotWorkers = snapshotWorkers;
+            PeerWindow = peerWindow; SnapshotWorkers = snapshotWorkers; AppliesPerTick = appliesPerTick;
         }
     }
 

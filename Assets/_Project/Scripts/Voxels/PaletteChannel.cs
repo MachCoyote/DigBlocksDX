@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 
 namespace DigBlocks.Voxels
@@ -21,6 +22,76 @@ namespace DigBlocks.Voxels
             cells = new NativeList<byte>(0, Allocator.Persistent);
             lookup = default;
             Storage = ChannelStorage.Uniform;
+        }
+
+        //Bulk load. Driving Set per cell re-reads the cell, probes the palette map and constructs a read
+        //view every time, and can rewrite the whole channel mid-build when the palette crosses a storage
+        //threshold. This collects the palette in one pass, picks the final width up front, and fills the
+        //cells with a single copy.
+        public static PaletteChannel FromValues(ReadOnlySpan<uint> values)
+        {
+            if (values.Length != ChunkLayout.Volume)
+                throw new ArgumentException("A channel load requires exactly one chunk of cells.", nameof(values));
+
+            var indices = new Dictionary<uint, int>();
+            var order = new List<uint>();
+            //a chunk cannot hold more distinct values than cells, so an entry always fits a ushort.
+            //At 64 KiB this stays below the large-object threshold and is collected cheaply.
+            var entries = new ushort[ChunkLayout.Volume];
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (!indices.TryGetValue(values[i], out int entry))
+                {
+                    entry = order.Count;
+                    order.Add(values[i]);
+                    indices.Add(values[i], entry);
+                }
+                entries[i] = (ushort)entry;
+            }
+
+            var channel = default(PaletteChannel);
+            channel.palette = new NativeList<uint>(order.Count, Allocator.Persistent);
+            for (int i = 0; i < order.Count; i++) channel.palette.Add(order[i]);
+
+            if (order.Count == 1)
+            {
+                channel.cells = new NativeList<byte>(0, Allocator.Persistent);
+                channel.lookup = default;
+                channel.Storage = ChannelStorage.Uniform;
+                return channel;
+            }
+
+            channel.Storage = order.Count <= 256 ? ChannelStorage.Palette8
+                : order.Count <= DirectThreshold ? ChannelStorage.Palette16 : ChannelStorage.Direct;
+            int width = channel.Storage == ChannelStorage.Palette8 ? 1 : channel.Storage == ChannelStorage.Palette16 ? 2 : 4;
+
+            var packed = new byte[ChunkLayout.Volume * width];
+            if (channel.Storage == ChannelStorage.Direct)
+                for (int i = 0; i < values.Length; i++)
+                {
+                    uint value = values[i];
+                    int at = i * 4;
+                    packed[at] = (byte)value; packed[at + 1] = (byte)(value >> 8);
+                    packed[at + 2] = (byte)(value >> 16); packed[at + 3] = (byte)(value >> 24);
+                }
+            else if (width == 1)
+                for (int i = 0; i < entries.Length; i++) packed[i] = (byte)entries[i];
+            else
+                for (int i = 0; i < entries.Length; i++)
+                { packed[i * 2] = (byte)entries[i]; packed[i * 2 + 1] = (byte)(entries[i] >> 8); }
+
+            channel.cells = new NativeList<byte>(packed.Length, Allocator.Persistent);
+            channel.cells.ResizeUninitialized(packed.Length);
+            channel.cells.AsArray().CopyFrom(packed);
+
+            //Direct storage holds raw values and needs no reverse map; the promote path disposes it too.
+            if (channel.Storage == ChannelStorage.Direct) channel.lookup = default;
+            else
+            {
+                channel.lookup = new NativeParallelHashMap<uint, int>(Math.Max(16, order.Count), Allocator.Persistent);
+                for (int i = 0; i < order.Count; i++) channel.lookup.Add(order[i], i);
+            }
+            return channel;
         }
 
         public uint Get(int index)

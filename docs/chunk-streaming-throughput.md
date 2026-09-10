@@ -104,9 +104,8 @@ Paths are relative to `Assets/_Project/Scripts`.
 - The single-player direct-delivery bypass is designed but deliberately not built now that the
   transfer stage is no longer the bottleneck. See
   [single-player-direct-delivery.md](single-player-direct-delivery.md).
-- Client-side decode still happens inline on the main thread with no per-tick budget. At 245
-  chunks this was not observed to stall, but a frame-pacing budget may be wanted before render
-  distances grow much further.
+- Client-side decode was indeed a problem: it cost 7.4 ms per chunk on the main thread and a whole
+  window landed in one frame. Fixed in [chunk-apply-frame-cost.md](chunk-apply-frame-cost.md).
 - Several tests previously pinned the authored render distances (75 chunks). They now derive the
   expected neighbourhood from `ChunkStreamingSettings`, since those distances are tuning rather
   than a contract. The authored value is currently horizontal 3 / vertical 2 (245 chunks).

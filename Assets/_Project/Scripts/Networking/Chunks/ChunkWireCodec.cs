@@ -36,7 +36,7 @@ namespace DigBlocks.ChunkProtocol
             uint[] solids = ReadChannel(reader, maxSolidStateId);
             uint[] fluids = ReadChannel(reader, maxFluidStateId);
             RequireEnd(reader);
-            return new ChunkImage(address, incarnation, revision, solids, fluids);
+            return ChunkImage.FromOwnedChannels(address, incarnation, revision, solids, fluids);
         }
 
         public static byte[] EncodeDelta(ChunkDelta delta)

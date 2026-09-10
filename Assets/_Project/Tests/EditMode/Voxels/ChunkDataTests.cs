@@ -89,6 +89,46 @@ namespace DigBlocks.Voxels.Tests
             Assert.That(chunk.SolidAt(1), Is.EqualTo(1));
         }
 
+        //A bulk load picks the cell width up front instead of promoting the channel as it fills, so
+        //every storage class must read back correctly and still accept later writes, including the
+        //write that pushes the palette past the width the load chose.
+        [Test]
+        public void BulkLoadedChannelsReadBackAndStayMutableAtEveryStorageWidth()
+        {
+            var fluids = new uint[ChunkLayout.Volume];
+            void Check(uint[] values, uint added, uint max)
+            {
+                using var chunk = ChunkData.FromChannels(default, 1, 1, values, fluids);
+                for (int i = 0; i < values.Length; i += 613)
+                    Assert.That(chunk.SolidAt(i), Is.EqualTo(values[i]), $"cell {i} read back wrong");
+                chunk.Apply(new[] { new CellEdit(1, added, 0) }, max, 0);
+                Assert.That(chunk.SolidAt(1), Is.EqualTo(added));
+                Assert.That(chunk.SolidAt(2), Is.EqualTo(values[2]), "an unrelated cell must survive the write");
+            }
+
+            var uniform = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < uniform.Length; i++) uniform[i] = 4;
+            Check(uniform, 7, 7);
+
+            var small = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < small.Length; i++) small[i] = (uint)(i % 5);
+            Check(small, 900, 1000);
+
+            //exactly fills the one-byte entry width, so the next write must widen the channel
+            var boundary = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < boundary.Length; i++) boundary[i] = (uint)(i % 256);
+            Check(boundary, 999, 999);
+
+            var wide = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < wide.Length; i++) wide[i] = (uint)(i % 300);
+            Check(wide, 5000, 5000);
+
+            //more distinct values than the palette holds, so cells carry values directly
+            var dense = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < dense.Length; i++) dense[i] = (uint)(i % 5000);
+            Check(dense, 4999, 4999);
+        }
+
         [Test]
         public void ReplicaImportDetachesChannelsAndAppliesOnlyValidMatchingBatches()
         {

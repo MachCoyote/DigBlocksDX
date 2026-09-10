@@ -17,6 +17,16 @@ namespace DigBlocks.Networking.NetCode
         //several chunks are in flight at once, so declarations are tracked per transfer rather than singly.
         private readonly Dictionary<ulong, TransferStart> active = new();
         private readonly Queue<byte[]> responses = new();
+        //fully received but not yet decoded. Bounded by the server's in-flight window, because a transfer
+        //only leaves that window once its acknowledgement goes back, which happens after it is applied.
+        private readonly Queue<Completed> completed = new();
+
+        private readonly struct Completed
+        {
+            public readonly TransferStart Declaration;
+            public readonly byte[] Payload;
+            public Completed(TransferStart declaration, byte[] payload) { Declaration = declaration; Payload = payload; }
+        }
         private ChunkInterest interest;
         //transfers complete out of order, so staleness is a settled set rather than a high-water mark:
         //everything at or below the floor is settled, and the set holds the gaps above it.
@@ -56,7 +66,7 @@ namespace DigBlocks.Networking.NetCode
                     return;
                 }
                 if (!store.SetReplicaInterest(next)) throw new FormatException("Rejected live interest.");
-                interest = next; assembler.Clear(); active.Clear(); responses.Clear(); retries = 0;
+                interest = next; assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); retries = 0;
                 //every transfer declared under the old epoch is dead, so settle the whole range at once.
                 retired.Clear(); retiredFloor = Math.Max(retiredFloor, highestSeen);
                 deadline = now + options.ProgressTimeout;
@@ -85,7 +95,15 @@ namespace DigBlocks.Networking.NetCode
             }
             deadline = now + options.ProgressTimeout;
             if (!assembler.AddSlice(id, offset, bytes, out var declaration, out var payload)) return;
-            active.Remove(id);
+            //decoding a chunk and loading it into the store costs real main-thread time, and a whole
+            //in-flight window finishes at once. Hand it to the tick budget rather than spending it here.
+            active.Remove(id); Retire(id);
+            completed.Enqueue(new Completed(declaration, payload));
+        }
+
+        private void Apply(TransferStart declaration, byte[] payload, double now)
+        {
+            ulong id = declaration.TransferId;
             ChunkImage image;
             if (declaration.IsDelta)
             {
@@ -104,7 +122,7 @@ namespace DigBlocks.Networking.NetCode
             }
             if (!store.PublishReplica(declaration.SubscriptionGeneration, image)) { RequestResync(id, now); return; }
             responses.Enqueue(ChunkTransferFrames.EncodeAcknowledgement(id, image.Revision));
-            Retire(id); retries = 0;
+            retries = 0;
         }
 
         private void RequestResync(ulong id, double now)
@@ -135,6 +153,14 @@ namespace DigBlocks.Networking.NetCode
         public void Tick(double now)
         {
             if (disposed) return;
+            //spend a bounded slice of the frame applying chunks, so an in-flight window landing together
+            //spreads over several frames instead of stalling one.
+            for (int applied = 0; applied < options.AppliesPerTick && completed.Count > 0; applied++)
+            {
+                var next = completed.Dequeue();
+                Apply(next.Declaration, next.Payload, now);
+                deadline = now + options.ProgressTimeout;
+            }
             //acknowledgements gate nothing on the server now, but they still confirm delta baselines,
             //so drain as many as the transport will take rather than one per tick.
             while (responses.Count > 0 && send(responses.Peek()))
@@ -142,6 +168,8 @@ namespace DigBlocks.Networking.NetCode
             if (responses.Count == 0 && interestRequest != null && send(interestRequest))
             { interestRequest = null; deadline = now + options.ProgressTimeout; }
             if (now < deadline) return;
+            //still working through the apply queue counts as progress, not a stall.
+            if (completed.Count != 0) return;
             if (active.Count != 0)
             {
                 //oldest declaration first; resyncing one is enough to restart progress.
@@ -155,7 +183,7 @@ namespace DigBlocks.Networking.NetCode
         public void Dispose()
         {
             if (disposed) return;
-            assembler.Clear(); active.Clear(); responses.Clear(); retired.Clear(); interestRequest = null; store.ClearReplicas(); disposed = true;
+            assembler.Clear(); active.Clear(); responses.Clear(); completed.Clear(); retired.Clear(); interestRequest = null; store.ClearReplicas(); disposed = true;
         }
     }
 }

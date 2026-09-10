@@ -33,18 +33,24 @@ namespace DigBlocks.Voxels
         public uint SolidAt(int index) { RequireAlive(); return solids.Get(index); }
         public uint FluidAt(int index) { RequireAlive(); return fluids.Get(index); }
 
-        public static ChunkData FromChannels(ChunkAddress address, ulong incarnation, ulong revision, uint[] solid, uint[] fluid)
+        //takes read-only views rather than arrays so a freshly decoded image can be loaded without copying
+        //128 KiB per channel first. Neither span is retained.
+        public static ChunkData FromChannels(ChunkAddress address, ulong incarnation, ulong revision, ReadOnlySpan<uint> solid, ReadOnlySpan<uint> fluid)
         {
-            if (revision == 0 || solid == null || fluid == null || solid.Length != ChunkLayout.Volume || fluid.Length != ChunkLayout.Volume)
+            if (revision == 0 || solid.Length != ChunkLayout.Volume || fluid.Length != ChunkLayout.Volume)
                 throw new ArgumentException("Invalid chunk image.");
-            var data = new ChunkData(address, incarnation, solid[0], fluid[0]);
-            try
-            {
-                for (int i = 1; i < ChunkLayout.Volume; i++) { data.solids.Set(i, solid[i]); data.fluids.Set(i, fluid[i]); }
-                data.Revision = revision;
-                return data;
-            }
-            catch { data.Dispose(); throw; }
+            if (incarnation == 0) throw new ArgumentOutOfRangeException(nameof(incarnation));
+            var loadedSolids = PaletteChannel.FromValues(solid);
+            PaletteChannel loadedFluids;
+            try { loadedFluids = PaletteChannel.FromValues(fluid); }
+            catch { loadedSolids.Dispose(); throw; }
+            return new ChunkData(address, incarnation, loadedSolids, loadedFluids) { Revision = revision };
+        }
+
+        private ChunkData(ChunkAddress address, ulong incarnation, PaletteChannel solid, PaletteChannel fluid)
+        {
+            Address = address; Incarnation = incarnation;
+            solids = solid; fluids = fluid;
         }
 
         public void ApplyReplica(CellEdit[] edits, ulong baseRevision, ulong resultRevision, uint maxSolid, uint maxFluid)
