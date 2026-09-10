@@ -24,7 +24,7 @@ MonoBehaviour:
   MaxChunks: 256
   QuadCapacity: 1048576
   UploadBytesPerFrame: 4194304
-  UploadSlots: 2
+  UploadSlots: 3
   FrameSlots: 3
   SecondaryFrameSlots: 2
   RenderDistance: 512

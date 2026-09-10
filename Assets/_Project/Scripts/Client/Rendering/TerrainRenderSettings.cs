@@ -15,7 +15,10 @@ namespace DigBlocks.Client.Rendering
         [Range(16, 32768)] public int MaxChunks = 256;
         [Min(393216)] public int QuadCapacity = 1048576;
         [Min(2359296)] public int UploadBytesPerFrame = 4 * 1024 * 1024;
-        [Range(1, 8)] public int UploadSlots = 2;
+        //frames of staged geometry in the upload ring. Each holds UploadBytesPerFrame, and chunks are
+        //appended into the one for the current frame, so this is ring depth rather than a cap on how
+        //many chunks may be published at once.
+        [Range(2, 8)] public int UploadSlots = 3;
         [Range(2, 5)] public int FrameSlots = 3;
 
         //ring depth for a camera other than the one the session drives. A shallower ring costs less memory

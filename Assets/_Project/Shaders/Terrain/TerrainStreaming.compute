@@ -4,11 +4,13 @@
 struct ChunkData { float3 origin; uint start; uint count; uint active; uint cameraVisible; uint reserved; };
 StructuredBuffer<uint3> _Upload;
 RWStructuredBuffer<uint3> _GeometryWrite;
-uint _UploadStart, _UploadCount;
+uint _UploadStart, _UploadCount, _UploadOffset;
 [numthreads(64, 1, 1)]
 void Upload(uint id : SV_DispatchThreadID)
 {
-    if (id < _UploadCount) _GeometryWrite[_UploadStart + id] = _Upload[id];
+    //_Upload is a ring shared by every chunk staged this frame, so each dispatch reads from its own
+    //offset within it rather than from the start of a buffer of its own.
+    if (id < _UploadCount) _GeometryWrite[_UploadStart + id] = _Upload[_UploadOffset + id];
 }
 
 StructuredBuffer<uint3> _Geometry;

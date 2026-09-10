@@ -41,11 +41,17 @@ namespace DigBlocks.Client.Rendering
                 issued = true;
             }
         }
-        private sealed class Upload : IDisposable
+        //one frame's worth of staged geometry. Chunks are appended into it rather than each taking a
+        //buffer sized for the worst mesh imaginable, so how many can be published in a frame is a
+        //question of bytes rather than of how many buffers happen to exist.
+        private sealed class Staging : IDisposable
         {
-            public readonly GraphicsBuffer Buffer = new(GraphicsBuffer.Target.Structured, GraphicsBuffer.UsageFlags.LockBufferForWrite, GreedyMesherJob.MaximumQuads, PackedQuad.Stride);
+            public readonly GraphicsBuffer Buffer;
             public Completion Completion = new();
-            public MeshRangeAllocator.Allocation Allocation;
+            public readonly List<MeshRangeAllocator.Allocation> Retained = new();
+            public int Used, Cycle = int.MinValue;
+            public Staging(int quads) => Buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured,
+                GraphicsBuffer.UsageFlags.LockBufferForWrite, quads, PackedQuad.Stride);
             public void Dispose() => Buffer.Dispose();
         }
         private sealed class Batch : IDisposable
@@ -110,7 +116,9 @@ namespace DigBlocks.Client.Rendering
         private readonly List<CameraSlot> secondaries = new();
         private readonly List<Camera> cameraScratch = new();
         private readonly List<Submission> submissions = new();
-        private readonly Upload[] uploads;
+        private readonly Staging[] stagings;
+        private readonly int stagingQuads;
+        private int stagingCursor;
         private readonly MeshRangeAllocator.Allocation[] meshes;
         private NativeArray<ChunkGpuData> chunks;
         private readonly CommandBuffer command = new() { name = "DigBlocks terrain streaming" };
@@ -174,8 +182,9 @@ namespace DigBlocks.Client.Rendering
                 primary = new CameraSlot { Frames = new Frame[settings.FrameSlots] };
                 for (int i = 0; i < primary.Frames.Length; i++) primary.Frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
                 SecondaryCameraRendering = settings.SecondaryCameraRendering;
-                uploads = new Upload[settings.UploadSlots];
-                for (int i = 0; i < uploads.Length; i++) uploads[i] = new Upload();
+                stagingQuads = settings.UploadBytesPerFrame / PackedQuad.Stride;
+                stagings = new Staging[settings.UploadSlots];
+                for (int i = 0; i < stagings.Length; i++) stagings[i] = new Staging(stagingQuads);
                 uploadKernel = settings.Compute.FindKernel("Upload"); cullKernel = settings.Compute.FindKernel("Cull");
                 RenderPipelineManager.endCameraRendering += EndCamera;
             }
@@ -193,7 +202,7 @@ namespace DigBlocks.Client.Rendering
             if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 || settings.MaxChunks < 1 || settings.MaxChunks > 32768 ||
                 settings.QuadCapacity < 2 * GreedyMesherJob.MaximumQuads || settings.QuadCapacity > 16 * 1024 * 1024 ||
                 settings.UploadBytesPerFrame < GreedyMesherJob.MaximumQuads * PackedQuad.Stride ||
-                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 1 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
+                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 2 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
                 throw new InvalidOperationException("Invalid terrain resource budgets.");
             foreach (var definition in content.Materials)
             {
@@ -221,7 +230,11 @@ namespace DigBlocks.Client.Rendering
         public bool TryPublish(uint slot, int3 position, NativeArray<PackedQuad> data, ChunkFaceConnectivity connectivity)
         {
             PollUploads();
-            if (uploadFrame != Time.frameCount) { uploadFrame = Time.frameCount; bytesThisFrame = 0; }
+            if (uploadFrame != Time.frameCount)
+            {
+                uploadFrame = Time.frameCount; bytesThisFrame = 0;
+                stagingCursor = (stagingCursor + 1) % stagings.Length;
+            }
             if (data.Length == 0)
             {
                 Replace(slot, position, null);
@@ -233,24 +246,34 @@ namespace DigBlocks.Client.Rendering
             if (bytes > settings.UploadBytesPerFrame - bytesThisFrame ||
                 LiveQuads - replacedCount + data.Length > settings.QuadCapacity - GreedyMesherJob.MaximumQuads)
             { DeferredUploads++; return false; }
-            Upload upload = null;
-            foreach (var candidate in uploads) if (candidate.Completion.Ready) { upload = candidate; break; }
-            if (upload == null) { DeferredUploads++; return false; }
+            var staging = stagings[stagingCursor];
+            if (staging.Cycle != uploadFrame)
+            {
+                //claiming it for this frame, which is only possible once the GPU has finished reading
+                //what it still holds from the last time round the ring.
+                if (staging.Retained.Count != 0) { DeferredUploads++; return false; }
+                staging.Cycle = uploadFrame; staging.Used = 0;
+            }
+            if (staging.Used + data.Length > stagingQuads) { DeferredUploads++; return false; }
             var allocation = allocator.Allocate(data.Length);
             if (allocation == null) { DeferredUploads++; return false; }
-            var mapped = upload.Buffer.LockBufferForWrite<PackedQuad>(0, data.Length);
+            var mapped = staging.Buffer.LockBufferForWrite<PackedQuad>(staging.Used, data.Length);
             NativeArray<PackedQuad>.Copy(data, mapped, data.Length);
-            upload.Buffer.UnlockBufferAfterWrite<PackedQuad>(data.Length);
+            staging.Buffer.UnlockBufferAfterWrite<PackedQuad>(data.Length);
             command.Clear();
-            command.SetComputeBufferParam(settings.Compute, uploadKernel, "_Upload", upload.Buffer);
+            command.SetComputeBufferParam(settings.Compute, uploadKernel, "_Upload", staging.Buffer);
             command.SetComputeBufferParam(settings.Compute, uploadKernel, "_GeometryWrite", geometry);
             command.SetComputeIntParam(settings.Compute, "_UploadCount", data.Length);
             command.SetComputeIntParam(settings.Compute, "_UploadStart", allocation.Start);
+            command.SetComputeIntParam(settings.Compute, "_UploadOffset", staging.Used);
             command.DispatchCompute(settings.Compute, uploadKernel, (data.Length + 63) / 64, 1, 1);
-            upload.Completion.Pending(); upload.Completion.Insert(command, marker);
+            //one fence per staging, re-inserted after each dispatch: fences are ordered, so the latest
+            //passing means every chunk written into this buffer has been consumed.
+            staging.Completion.Pending(); staging.Completion.Insert(command, marker);
             Graphics.ExecuteCommandBuffer(command);
             allocator.Retain(allocation);
-            upload.Allocation = allocation;
+            staging.Retained.Add(allocation);
+            staging.Used += data.Length;
             Replace(slot, position, allocation);
             occlusionGraph.SetNode((int)slot, position, connectivity, true);
             UploadedBytes += bytes; bytesThisFrame += bytes;
@@ -258,12 +281,13 @@ namespace DigBlocks.Client.Rendering
         }
         private void PollUploads()
         {
-            foreach (var upload in uploads)
-                if (upload.Allocation != null && upload.Completion.Ready)
-                {
-                    allocator.Release(upload.Allocation);
-                    upload.Allocation = null;
-                }
+            foreach (var staging in stagings)
+            {
+                if (staging.Retained.Count == 0 || !staging.Completion.Ready) continue;
+                foreach (var allocation in staging.Retained) allocator.Release(allocation);
+                staging.Retained.Clear();
+                staging.Used = 0;
+            }
         }
         private void Replace(uint slot, int3 position, MeshRangeAllocator.Allocation allocation)
         {
@@ -536,7 +560,7 @@ namespace DigBlocks.Client.Rendering
             if (primary?.Frames != null) foreach (var frame in primary.Frames) frame?.Dispose();
             foreach (var slot in secondaries) if (slot.Frames != null) foreach (var frame in slot.Frames) frame?.Dispose();
             secondaries.Clear(); submissions.Clear();
-            if (uploads != null) foreach (var upload in uploads) upload?.Dispose();
+            if (stagings != null) foreach (var staging in stagings) staging?.Dispose();
             if (materials != null) foreach (var material in materials) if (material != null) UnityEngine.Object.Destroy(material);
             geometry?.Dispose(); tints?.Dispose(); marker?.Dispose();
             if (chunks.IsCreated) chunks.Dispose();

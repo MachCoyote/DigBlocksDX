@@ -21,7 +21,8 @@ namespace DigBlocks.Client.Rendering
             public uint Slot;
             public ulong Dirty = 1, Built;
             public bool Pending;
-            public long Enqueued;
+            //where this entry sits in the ready queue, so leaving it is a swap-remove rather than a scan.
+            public int Bucket = -1, BucketSlot = -1;
         }
         private sealed class Worker : IDisposable
         {
@@ -57,18 +58,18 @@ namespace DigBlocks.Client.Rendering
         private readonly TerrainRenderer renderer;
         private readonly TerrainRenderSettings settings;
         private ResidentChunkStore store;
-        private long tick;
+        //chunks waiting to be meshed, bucketed by how many chunks away from the camera they are, so
+        //picking the next one is a walk of a few buckets rather than of every resident chunk. A linear
+        //scan per free worker per tick is invisible at a few hundred chunks and is not at a few thousand.
+        private const int Buckets = 256;
+        private readonly List<Entry>[] ready = new List<Entry>[Buckets];
+        private int3 bucketAnchor;
+        private bool anchored;
+        private int queuedCount, pendingCount;
         public int ResidentCount => entries.Count;
         public int BuiltCount { get; private set; }
         public int StaleResults { get; private set; }
-        public bool IsCurrent
-        {
-            get
-            {
-                foreach (var entry in entries.Values) if (entry.Pending || entry.Built != entry.Dirty) return false;
-                return true;
-            }
-        }
+        public bool IsCurrent => queuedCount == 0 && pendingCount == 0;
 
         public ChunkMeshScheduler(CompiledBlockContent content, TerrainRenderSettings settings, TerrainRenderer renderer)
         {
@@ -77,12 +78,12 @@ namespace DigBlocks.Client.Rendering
             appearance = BlockAppearanceTable.Create(content, Allocator.Persistent);
             workers = new Worker[settings.MeshWorkers];
             for (int i = 0; i < workers.Length; i++) workers[i] = new Worker();
+            for (int i = 0; i < ready.Length; i++) ready[i] = new List<Entry>();
             ResetSlots();
         }
 
         public void Tick(ResidentChunkStore current, float3 cameraPosition)
         {
-            tick++;
             if (current != null && current.IsDisposed) current = null;
             if (!ReferenceEquals(store, current))
             {
@@ -105,28 +106,92 @@ namespace DigBlocks.Client.Rendering
                 bool currentEntry = entries.TryGetValue(entry.Address, out var active) && ReferenceEquals(active, entry);
                 if (!currentEntry || !IsWorkerCurrent(worker))
                 {
-                    entry.Pending = false; worker.Entry = null; StaleResults++; continue;
+                    Settle(entry); worker.Entry = null; StaleResults++; continue;
                 }
                 if (!renderer.TryPublish(entry.Slot, entry.Address.Position, worker.Output.AsArray(), new ChunkFaceConnectivity(worker.Visibility.Value))) continue;
                 if (entry.Built == 0) BuiltCount++;
-                entry.Built = worker.Version; entry.Pending = false; worker.Entry = null;
+                entry.Built = worker.Version; Settle(entry); worker.Entry = null;
             }
             if (store == null) { renderer.SetGraphReady(false); return; }
+            //the queue is ordered against the camera's chunk, so it only has to be rebuilt when the
+            //camera crosses a chunk boundary rather than every frame the camera moves at all.
+            var anchor = (int3)math.floor(cameraPosition / ChunkLayout.Edge);
+            if (!anchored || !anchor.Equals(bucketAnchor)) Rebucket(anchor);
             foreach (var worker in workers)
             {
                 if (worker.Entry != null) continue;
-                Entry best = null; double priority = double.MaxValue;
-                foreach (var entry in entries.Values)
-                {
-                    if (entry.Pending || entry.Dirty == entry.Built) continue;
-                    double distance = math.lengthsq((float3)entry.Address.Position * 32 + 16 - cameraPosition);
-                    double score = distance / (1 + (tick - entry.Enqueued) * 0.1);
-                    if (score < priority) { best = entry; priority = score; }
-                }
+                var best = TakeNearest();
                 if (best == null) break;
                 Schedule(worker, best);
             }
             renderer.SetGraphReady(store.DataReady && BuiltCount == entries.Count && IsCurrent);
+        }
+
+        //---------------------------------------------------------------- ready queue
+
+        private int BucketOf(Entry entry)
+        {
+            int3 delta = entry.Address.Position - bucketAnchor;
+            int distance = (int)math.round(math.length((float3)delta));
+            return math.clamp(distance, 0, Buckets - 1);
+        }
+
+        private void Enqueue(Entry entry)
+        {
+            if (entry.Bucket >= 0 || entry.Pending || entry.Built == entry.Dirty) return;
+            int bucket = anchored ? BucketOf(entry) : 0;
+            entry.Bucket = bucket; entry.BucketSlot = ready[bucket].Count;
+            ready[bucket].Add(entry);
+            queuedCount++;
+        }
+
+        private void Remove(Entry entry)
+        {
+            if (entry.Bucket < 0) return;
+            var list = ready[entry.Bucket];
+            int slot = entry.BucketSlot, last = list.Count - 1;
+            list[slot] = list[last];
+            list[slot].BucketSlot = slot;
+            list.RemoveAt(last);
+            entry.Bucket = -1; entry.BucketSlot = -1;
+            queuedCount--;
+        }
+
+        private Entry TakeNearest()
+        {
+            for (int bucket = 0; bucket < Buckets; bucket++)
+            {
+                var list = ready[bucket];
+                if (list.Count == 0) continue;
+                var entry = list[list.Count - 1];
+                Remove(entry);
+                return entry;
+            }
+            return null;
+        }
+
+        private void Rebucket(int3 anchor)
+        {
+            rebucketing.Clear();
+            for (int bucket = 0; bucket < Buckets; bucket++)
+            {
+                var list = ready[bucket];
+                for (int i = 0; i < list.Count; i++) { rebucketing.Add(list[i]); list[i].Bucket = -1; list[i].BucketSlot = -1; }
+                list.Clear();
+            }
+            queuedCount = 0;
+            bucketAnchor = anchor; anchored = true;
+            foreach (var entry in rebucketing) Enqueue(entry);
+        }
+
+        private readonly List<Entry> rebucketing = new();
+
+        //a chunk stops waiting once its worker finishes, and joins the queue again if it was dirtied
+        //while it was out. An entry the store has since dropped simply leaves.
+        private void Settle(Entry entry)
+        {
+            if (entry.Pending) { entry.Pending = false; pendingCount--; }
+            if (entries.TryGetValue(entry.Address, out var active) && ReferenceEquals(active, entry)) Enqueue(entry);
         }
 
         private void Schedule(Worker worker, Entry entry)
@@ -162,7 +227,7 @@ namespace DigBlocks.Client.Rendering
                 Queue = worker.VisibilityQueue, Result = worker.Visibility
             }.Schedule(padding);
             worker.Handle = JobHandle.CombineDependencies(mesh, visibility);
-            worker.Entry = entry; entry.Pending = true;
+            worker.Entry = entry; entry.Pending = true; pendingCount++;
         }
 
         private bool IsWorkerCurrent(Worker worker)
@@ -185,7 +250,7 @@ namespace DigBlocks.Client.Rendering
             if (!entries.TryGetValue(address, out var entry))
             {
                 if (freeSlots.Count == 0) throw new InvalidOperationException("Terrain chunk capacity is smaller than admitted residency.");
-                entry = new Entry { Address = address, Slot = freeSlots.Pop(), Enqueued = tick };
+                entry = new Entry { Address = address, Slot = freeSlots.Pop() };
                 entries.Add(address, entry);
             }
             Dirty(entry);
@@ -198,17 +263,24 @@ namespace DigBlocks.Client.Rendering
 
         private void Dirty(Entry entry)
         {
-            if (entry.Built == entry.Dirty) entry.Enqueued = tick;
             entry.Dirty++;
+            Enqueue(entry);
         }
         private void OnReset()
         {
             entries.Clear(); ResetSlots(); BuiltCount = 0; renderer.SetGraphReady(false); renderer.ClearMeshes();
+            foreach (var list in ready) list.Clear();
+            queuedCount = 0; anchored = false;
+            //workers still running belong to the store that just went away. Their results are rejected
+            //on completion, but each still settles, so the count has to keep expecting them.
+            pendingCount = 0;
+            foreach (var worker in workers) if (worker.Entry != null) pendingCount++;
         }
 
         private void OnRemoved(ChunkAddress address)
         {
             if (!entries.Remove(address, out var removed)) return;
+            Remove(removed);
             renderer.SetGraphReady(false);
             renderer.Remove(removed.Slot);
             freeSlots.Push(removed.Slot);
