@@ -115,25 +115,29 @@ namespace DigBlocks.Networking.NetCode.Tests
 
         //---------------------------------------------------------------- pipeline accounting
 
+        //the authored shape and budgets, so this measures what actually ships.
         [Test]
-        public void PipelineTickAccounting() => Debug.Log(Run("h=3 v=2", new ChunkStreamingOptions(3, 2), 900, trace: true));
+        public void PipelineTickAccounting() => Debug.Log(Run("authored h=12 v=2",
+            new ChunkStreamingOptions(12, 2, globalBytesPerTick: 2097152, peerBytesPerTick: 1048576,
+                maxPayloads: 128, peerWindow: 64, appliesPerTick: 16), 1800, trace: true));
 
         [Test]
         public void ParameterSweep()
         {
             var lines = new List<string>();
-            foreach (int window in new[] { 8, 16, 32, 64 })
-            foreach (int applies in new[] { 2, 4, 8, 16 })
+            foreach (int window in new[] { 16, 64 })
+            foreach (int applies in new[] { 2, 8, 16, 32 })
                 lines.Add(Run($"window {window,2} applies {applies,2}",
-                    new ChunkStreamingOptions(3, 2, maxPayloads: 256, peerWindow: window, appliesPerTick: applies), 900, trace: false));
+                    new ChunkStreamingOptions(12, 2, globalBytesPerTick: 2097152, peerBytesPerTick: 1048576,
+                        maxPayloads: 256, peerWindow: window, appliesPerTick: applies), 1800, trace: false));
             Debug.Log("[profile:sweep]\n" + string.Join("\n", lines));
         }
 
         [Test]
         public void UnboundedBudgets()
         {
-            var options = new ChunkStreamingOptions(3, 2, globalBytesPerTick: 8388608, peerBytesPerTick: 8388608,
-                maxPayloads: 256, peerWindow: 64, appliesPerTick: 64);
+            var options = new ChunkStreamingOptions(12, 2, globalBytesPerTick: 8388608, peerBytesPerTick: 8388608,
+                maxPayloads: 256, peerWindow: 1024, appliesPerTick: 64);
             Debug.Log(Run("unbounded", options, 900, trace: true));
         }
 

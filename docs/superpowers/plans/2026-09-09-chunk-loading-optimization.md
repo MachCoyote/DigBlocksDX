@@ -1,6 +1,12 @@
 # Chunk loading optimization plan
 
-Date: 2026-09-09. Driven by [chunk-loading-gap-analysis.md](../../chunk-loading-gap-analysis.md),
+Date: 2026-09-09. **Completed 2026-09-10**; every step landed. Outcome and measurements in
+[chunk-loading-optimization.md](../../chunk-loading-optimization.md).
+
+One decision changed during implementation: the receipt/acknowledgement split in step 4 was dropped.
+A sent transfer holds no payload, so simply deepening the window achieves the same decoupling with no
+protocol change. One was added: the asynchronous snapshot encoder was removed outright once encoding
+became a copy, which took roughly three ticks of latency out of every chunk. Driven by [chunk-loading-gap-analysis.md](../../chunk-loading-gap-analysis.md),
 which holds the measurements this plan acts on.
 
 ## Goal

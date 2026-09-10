@@ -1,6 +1,8 @@
 # Chunk loading: where the pipeline falls short
 
-Status: analysis and proposal, September 9, 2026. No implementation. Companion to
+Status: analysis and proposal, September 9, 2026. **Acted on September 10** — see
+[chunk-loading-optimization.md](chunk-loading-optimization.md) for what was built and what it
+measured. The measurements below are the "before" state. Companion to
 [chunk-streaming-throughput.md](chunk-streaming-throughput.md) and
 [chunk-apply-frame-cost.md](chunk-apply-frame-cost.md), both of which this supersedes on the
 question of what currently caps load speed.

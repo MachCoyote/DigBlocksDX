@@ -20,9 +20,9 @@ MonoBehaviour:
   Tints:
   - Key: digblocks:grass
     Color: {r: 0.55, g: 0.8, b: 0.3, a: 1}
-  MeshWorkers: 6
-  MaxChunks: 256
-  QuadCapacity: 1048576
+  MeshWorkers: 8
+  MaxChunks: 4096
+  QuadCapacity: 2097152
   UploadBytesPerFrame: 4194304
   UploadSlots: 3
   FrameSlots: 3

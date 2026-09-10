@@ -1,6 +1,9 @@
 # Chunk streaming throughput implementation summary
 
-Status: implemented September 9, 2026.
+Status: implemented September 9, 2026. **Partly superseded** by
+[chunk-loading-optimization.md](chunk-loading-optimization.md), September 10. The pipelining
+described here still stands; the "Unverified: what now caps load speed" section below turned out to
+be wrong, and the deferred single-player bypass has since been built behind a toggle.
 
 This change removes serialisation from the chunk transfer stage. The pipeline previously
 carried one chunk at a time per peer and would not even *request* the next chunk until the
@@ -101,7 +104,11 @@ Paths are relative to `Assets/_Project/Scripts`.
 
 ## Unverified: what now caps load speed
 
-Recorded September 9, 2026 as a hypothesis, not a measurement. Nobody has tested it.
+Recorded September 9, 2026 as a hypothesis, not a measurement. **It was tested the next day and it
+was wrong.** The apply budget was the cap the whole time: the encoder was pegged on zero ticks of
+127, with two encoded payloads sitting ready on every tick. See
+[chunk-loading-gap-analysis.md](chunk-loading-gap-analysis.md). The rest of this section is left as
+written.
 
 A 245-chunk neighbourhood converges in about 125 ticks, roughly 2 chunks per tick. The client-side
 apply budget is not what caps that: budgets of 2, 3 and 4 all converge in the same 125 ticks, and

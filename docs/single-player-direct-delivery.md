@@ -1,6 +1,13 @@
-# Single-player direct chunk delivery (deferred)
+# Single-player direct chunk delivery
 
-Status: designed, deliberately not implemented, September 9, 2026.
+Status: designed September 9, 2026, **implemented September 10** as the optional toggle this document
+argued for. Off by default; F4 in the debug menu. See
+[chunk-loading-optimization.md](chunk-loading-optimization.md).
+
+The reasoning below is left as written, because it is still why the wire path is the default. One
+figure has moved: encoding a chunk now costs nine microseconds rather than 0.65 ms, so direct
+delivery saves the copy and the slicing rather than saving the codec, and is worth less than when it
+was proposed.
 
 ## Idea
 

@@ -1,6 +1,9 @@
 # Chunk apply frame cost implementation summary
 
-Status: implemented September 9, 2026. Companion to
+Status: implemented September 9, 2026. **Both deferred options below were revisited on September 10
+and both were taken**: the wire format now carries the storage layout, and off-thread decode was
+resolved the other way round by making encoding cheap enough to do inline. See
+[chunk-loading-optimization.md](chunk-loading-optimization.md). Companion to
 [chunk-streaming-throughput.md](chunk-streaming-throughput.md), which made loading fast; this
 made it smooth.
 
@@ -125,7 +128,7 @@ Paths are relative to `Assets/_Project/Scripts`.
 The worst frame already fits comfortably inside the budget, so both of these are throughput work
 rather than smoothness work.
 
-### Off-thread decode: rejected
+### Off-thread decode: rejected, and later moot
 
 Moving decode and channel construction to a worker thread was considered and deliberately not done.
 
@@ -139,7 +142,7 @@ Moving decode and channel construction to a worker thread was considered and del
 
 Revisit only if profiling shows the main thread starved during loading for some other reason.
 
-### Wire format carrying the storage layout: available, not scheduled
+### Wire format carrying the storage layout: done, September 10
 
 Applying a chunk would become a palette read plus a memcpy, removing most of the remaining ~1.4 ms
 per chunk. Validation would also get cheaper without getting weaker, since it would check a palette

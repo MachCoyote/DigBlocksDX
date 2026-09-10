@@ -116,14 +116,17 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             }
             Assert.That(connected, Is.True);
             Assert.Throws<ArgumentOutOfRangeException>(() => client.TrySend(connection, new byte[BulkDriver.MaxPayloadBytes + 1]));
+            //push past the queue depth rather than a fixed number, so raising the depth does not turn
+            //this into an assertion that the queue is unbounded.
+            int attempts = BulkDriver.MaxMessagesPerConnection * 2;
             int queued = 0;
-            for (; queued < 1000; queued++)
+            for (; queued < attempts; queued++)
             {
                 byte[] payload = { (byte)queued, (byte)(queued >> 8), 77 };
                 if (!client.TrySend(connection, payload)) break;
                 payload[2] = 0;
             }
-            Assert.That(queued, Is.GreaterThan(0).And.LessThan(1000), "The application send queue must be bounded.");
+            Assert.That(queued, Is.GreaterThan(0).And.LessThan(attempts), "The application send queue must be bounded.");
             int received = 0;
             deadline = Time.realtimeSinceStartupAsDouble + 10;
             while (received < queued && Time.realtimeSinceStartupAsDouble < deadline)

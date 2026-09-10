@@ -13,5 +13,10 @@ MonoBehaviour:
   m_Name: ChunkStreamingSettings
   m_EditorClassIdentifier: DigBlocks.Networking.NetCode::DigBlocks.Networking.NetCode.ChunkStreamingSettings
   WorldId: 1
-  HorizontalRenderDistanceChunks: 3
+  HorizontalRenderDistanceChunks: 12
   VerticalRenderDistanceChunks: 2
+  GlobalBytesPerTick: 2097152
+  PeerBytesPerTick: 1048576
+  PeerWindow: 64
+  MaxBufferedPayloads: 128
+  AppliesPerTick: 32

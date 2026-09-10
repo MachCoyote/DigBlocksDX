@@ -24,11 +24,12 @@ namespace DigBlocks.Networking.NetCode
         //protocol ceiling for one bulk message. Senders slice to the connection's negotiated capacity,
         //which is path-MTU dependent and always lower; this only bounds validation and receive buffers.
         public const int MaxPayloadBytes = 1200;
-        private const int MaxQueuedMessages = 1024;
+        private const int MaxQueuedMessages = 8192;
         //one peer's queue depth. Comfortably above a tick's enqueue burst, so a full queue means the
         //remote is not draining rather than that the sender simply got ahead within one tick.
-        public const int MaxMessagesPerConnection = 128;
-        private const int MaxMessagesPerConnectionPerUpdate = 64;
+        public const int MaxMessagesPerConnection = 1024;
+        //a chunk is roughly a dozen packets, so this is what decides how many can leave in a tick.
+        private const int MaxMessagesPerConnectionPerUpdate = 512;
         private const int MaxQueuedEvents = 256;
         private readonly int maxConnections;
         private readonly bool server;
@@ -62,9 +63,11 @@ namespace DigBlocks.Networking.NetCode
             var settings = new NetworkSettings(Allocator.Temp);
             try
             {
-                settings.WithReliableStageParameters(windowSize: 64);
+                //the reliable pipeline will not hold more unacknowledged packets than this, so at a dozen packets
+                //per chunk it is a direct cap on chunks in flight. The default of 32 is far too shallow here.
+                settings.WithReliableStageParameters(windowSize: 256);
                 if (simulation.HasValue) { var parameters = simulation.Value; settings.AddRawParameterStruct(ref parameters); }
-                settings.WithNetworkConfigParameters(sendQueueCapacity: 256, receiveQueueCapacity: 256);
+                settings.WithNetworkConfigParameters(sendQueueCapacity: 2048, receiveQueueCapacity: 2048);
                 driver = ipc ? NetworkDriver.Create(new IPCNetworkInterface(), settings)
                     : NetworkDriver.Create(new UDPNetworkInterface(), settings);
             }
