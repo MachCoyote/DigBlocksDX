@@ -15,7 +15,7 @@ namespace DigBlocks.Voxels.Runtime.Tests
         public void LeasesShareAnEntityAndFinalReleaseUnloadsWithNewIncarnationOnReentry()
         {
             using var world = new World("Residency test");
-            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 1, 2);
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 1);
             var address = new ChunkAddress(1, new int3(-2, 3, 7));
             using var first = store.Acquire(address);
             using var second = store.Acquire(address);
@@ -126,45 +126,35 @@ namespace DigBlocks.Voxels.Runtime.Tests
             Assert.That(source.Calls, Is.EqualTo(2));
         }
 
-        [UnityTest]
-        public IEnumerator SnapshotSurvivesEditsButNotUnloadAndCapacityIncludesCompletedWork()
+        //Encoding is synchronous now, so a snapshot is the chunk as it stands rather than as it stood
+        //when some worker was asked for it. What still has to hold is that it round-trips exactly and
+        //that its revision tracks edits.
+        [Test]
+        public void SnapshotEncodesTheChunkAsItStandsAndTracksEdits()
         {
             using var world = new World("Snapshot test");
-            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 2, 1);
-            using var lease = store.Acquire(default);
-            Assert.That(store.TryRequestSnapshot(lease, out ulong id), Is.True);
-            Assert.That(store.TryRequestSnapshot(lease, out _), Is.False);
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 2);
+            var lease = store.Acquire(default);
+            var before = ChunkWireCodec.DecodeSnapshot(store.EncodeSnapshot(lease), 1, 1);
+            Assert.That(before.Revision, Is.EqualTo(1)); Assert.That(before.SolidAt(0), Is.Zero);
+
             lease.Apply(new[] { new CellEdit(0, 1, 0) });
-            double deadline = Time.realtimeSinceStartupAsDouble + 5;
-            while (store.ReadySnapshots == 0 && Time.realtimeSinceStartupAsDouble < deadline) { store.PumpSnapshots(); yield return null; }
-            Assert.That(store.ReadySnapshots, Is.EqualTo(1));
-            Assert.That(store.TryRequestSnapshot(lease, out _), Is.False);
-            Assert.That(store.TryTakeSnapshot(out var result), Is.True);
-            Assert.That(result.RequestId, Is.EqualTo(id)); Assert.That(result.Error, Is.Null);
-            var image = ChunkWireCodec.DecodeSnapshot(result.Payload, 1, 1);
-            Assert.That(image.Revision, Is.EqualTo(1)); Assert.That(image.SolidAt(0), Is.Zero);
-            Assert.That(store.TryRequestSnapshot(lease, out _), Is.True);
+            var after = ChunkWireCodec.DecodeSnapshot(store.EncodeSnapshot(lease), 1, 1);
+            Assert.That(after.Revision, Is.EqualTo(2)); Assert.That(after.SolidAt(0), Is.EqualTo(1));
+            for (int i = 1; i < ChunkLayout.Volume; i += 997) Assert.That(after.SolidAt(i), Is.Zero);
+
             lease.Dispose();
-            using var replacement = store.Acquire(default);
-            deadline = Time.realtimeSinceStartupAsDouble + 5;
-            while (store.PendingSnapshots != 0 && Time.realtimeSinceStartupAsDouble < deadline) { store.PumpSnapshots(); yield return null; }
-            Assert.That(store.PendingSnapshots, Is.Zero); Assert.That(store.TryTakeSnapshot(out _), Is.False);
+            Assert.Throws<ObjectDisposedException>(() => store.EncodeSnapshot(lease));
         }
 
-        [UnityTest]
-        public IEnumerator CancellationAndWorldDestructionDrainSnapshotWorkers()
+        [Test]
+        public void DestroyingTheWorldReleasesTheStore()
         {
-            var world = new World("Cancellation test");
-            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 1, 1);
-            using var lease = store.Acquire(default);
-            store.TryRequestSnapshot(lease, out ulong id); store.CancelSnapshot(id);
-            double deadline = Time.realtimeSinceStartupAsDouble + 5;
-            while (store.PendingSnapshots != 0 && Time.realtimeSinceStartupAsDouble < deadline) { store.PumpSnapshots(); yield return null; }
-            Assert.That(store.PendingSnapshots, Is.Zero); Assert.That(store.TryTakeSnapshot(out _), Is.False);
-            store.TryRequestSnapshot(lease, out _);
-            for (int i = 0; i < 4; i++) { store.PumpSnapshots(); yield return null; }
+            var world = new World("Store teardown");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 1);
+            store.Acquire(default);
             world.Dispose();
-            Assert.That(store.PendingSnapshots, Is.Zero);
+            Assert.That(store.IsDisposed, Is.True);
         }
 
         private sealed class CountingSource : IAuthoritativeChunkSource

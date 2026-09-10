@@ -12,16 +12,6 @@ namespace DigBlocks.Voxels.Runtime
     public struct ResidentChunk : IComponentData
     { public ChunkAddress Address; public ulong Incarnation, Revision; }
 
-    public sealed class SnapshotResult
-    {
-        public ulong RequestId { get; internal set; }
-        public ChunkAddress Address { get; internal set; }
-        public ulong Incarnation { get; internal set; }
-        public ulong Revision { get; internal set; }
-        public byte[] Payload { get; internal set; }
-        public Exception Error { get; internal set; }
-    }
-
     public sealed class ChunkLease : IDisposable
     {
         internal readonly ResidentChunkStore Owner;
@@ -44,13 +34,13 @@ namespace DigBlocks.Voxels.Runtime
     {
         private readonly EntityManager manager;
         private readonly BlockRegistry registry;
-        private readonly int maxResidents, maxSnapshots, ownerThread;
+        private readonly int maxResidents, ownerThread;
         private readonly Dictionary<ChunkAddress, Entry> chunks = new();
-        private readonly List<Pending> snapshots = new();
-        //two 128 KiB buffers per encode would otherwise hit the large object heap for every chunk;
-        //workers return them here when they finish, so a steady load recycles a small fixed set.
-        private readonly System.Collections.Concurrent.ConcurrentBag<uint[]> cellBuffers = new();
-        private ulong nextIncarnation = 1, nextRequest = 1;
+        //encoding and publishing are both a palette copy and a word copy now, and both are strictly
+        //sequential on the owning thread, so one scratch pair each serves every chunk.
+        private readonly PackedChannelData encodeSolids = new(), encodeFluids = new();
+        private readonly PackedChannelData publishSolids = new(), publishFluids = new();
+        private ulong nextIncarnation = 1;
         private bool disposed;
         private bool replicas;
         private ChunkInterest interest;
@@ -62,23 +52,11 @@ namespace DigBlocks.Voxels.Runtime
             public ulong[] FaceHashes;
             public readonly Queue<ChunkDelta> History = new();
         }
-        private sealed class Pending
-        {
-            public ulong Id;
-            public ChunkCapture Capture;
-            public ChunkAddress Address;
-            public ulong Incarnation, Revision;
-            public bool Cancelled, Encoding;
-            public readonly ManualResetEventSlim Done = new(false);
-            public SnapshotResult Result;
-        }
-
-        internal ResidentChunkStore(EntityManager manager, BlockRegistry registry, int maxResidents, int maxSnapshots)
+        internal ResidentChunkStore(EntityManager manager, BlockRegistry registry, int maxResidents)
         {
             if (registry == null) throw new ArgumentNullException(nameof(registry));
             if (maxResidents < 1 || maxResidents > 65536) throw new ArgumentOutOfRangeException(nameof(maxResidents));
-            if (maxSnapshots < 1 || maxSnapshots > 64) throw new ArgumentOutOfRangeException(nameof(maxSnapshots));
-            this.manager = manager; this.registry = registry; this.maxResidents = maxResidents; this.maxSnapshots = maxSnapshots;
+            this.manager = manager; this.registry = registry; this.maxResidents = maxResidents;
             ownerThread = Thread.CurrentThread.ManagedThreadId;
         }
         public int Count => chunks.Count;
@@ -112,15 +90,17 @@ namespace DigBlocks.Voxels.Runtime
             if (!replicas || !chunks.TryGetValue(address, out var entry)) throw new InvalidOperationException("Replica is no longer resident.");
             return entry.Data.ScheduleSolidCopy(destination, dependency);
         }
-        public int PendingSnapshots => snapshots.Count;
-        public int ReadySnapshots
+        /// <summary>
+        /// Encodes the leased chunk in the layout it is already stored in. This used to hand a 256 KiB
+        /// expansion to a worker thread and pick the result up a tick or more later; the copy is now
+        /// small enough that the latency cost far outweighed the thread.
+        /// </summary>
+        public byte[] EncodeSnapshot(ChunkLease lease)
         {
-            get
-            {
-                int count = 0;
-                foreach (var item in snapshots) if (item.Encoding && item.Done.IsSet && IsLive(item)) count++;
-                return count;
-            }
+            Validate(lease);
+            lease.Data.CopyPacked(encodeSolids, encodeFluids);
+            return ChunkWireCodec.EncodeSnapshot(lease.Address, lease.Incarnation, lease.Data.Revision,
+                encodeSolids, encodeFluids);
         }
         public ChunkLease Acquire(ChunkAddress address)
         {
@@ -220,7 +200,7 @@ namespace DigBlocks.Voxels.Runtime
         public void EnableReplicas()
         {
             RequireAlive();
-            if (chunks.Count != 0 || snapshots.Count != 0) throw new InvalidOperationException("Replica mode requires an empty store.");
+            if (chunks.Count != 0) throw new InvalidOperationException("Replica mode requires an empty store.");
             replicas = true;
         }
 
@@ -278,32 +258,37 @@ namespace DigBlocks.Voxels.Runtime
         public bool PublishReplica(ulong epoch, ChunkImage image)
         {
             if (image == null) throw new ArgumentNullException(nameof(image));
-            return PublishReplica(epoch, image.Address, image.Incarnation, image.Revision, image.Solids, image.Fluids);
+            PackedChannelData.Pack(image.Solids, publishSolids);
+            PackedChannelData.Pack(image.Fluids, publishFluids);
+            return PublishReplica(epoch, image.Address, image.Incarnation, image.Revision, publishSolids, publishFluids);
         }
 
-        //span overload so a decoded chunk can be published straight out of a reused buffer, with no
-        //ChunkImage and no 128 KiB copy per channel standing between the wire and the store.
+        //takes the chunk in the layout the wire delivered it in, so publishing is a copy rather than a
+        //re-pack, and validation reads a palette of a few hundred entries instead of all 32,768 cells.
         public bool PublishReplica(ulong epoch, ChunkAddress address, ulong incarnation, ulong revision,
-            ReadOnlySpan<uint> solids, ReadOnlySpan<uint> fluids)
+            PackedChannelData solids, PackedChannelData fluids)
         {
             RequireAlive();
             if (!replicas) throw new InvalidOperationException("Not a replica store.");
             if (incarnation == 0) throw new ArgumentOutOfRangeException(nameof(incarnation));
             if (revision == 0) throw new ArgumentOutOfRangeException(nameof(revision));
-            if (solids.Length != ChunkLayout.Volume) throw new ArgumentException("Solid channel must contain exactly one chunk.", nameof(solids));
-            if (fluids.Length != ChunkLayout.Volume) throw new ArgumentException("Fluid channel must contain exactly one chunk.", nameof(fluids));
+            if (solids == null) throw new ArgumentNullException(nameof(solids));
+            if (fluids == null) throw new ArgumentNullException(nameof(fluids));
             if (interest == null || epoch != interest.Epoch || !interest.Contains(address)) return false;
             chunks.TryGetValue(address, out var previous);
             if (previous != null && (previous.Data.Incarnation != incarnation || previous.Data.Revision > revision)) return false;
-            for (int i = 0; i < ChunkLayout.Volume; i++)
-            {
-                var solid = registry.GetSolid(solids[i]); registry.GetFluid(fluids[i]);
-                if (fluids[i] != 0 && !solid.PermitsFluid) throw new ArgumentException("Replica solid does not permit fluid.");
-            }
+            ValidateStates(solids, true);
+            ValidateStates(fluids, false);
+            //only the fluid cross-check is inherently per cell, and a chunk holding no fluid at all --
+            //which is nearly all of them -- skips it.
+            if (!(fluids.Storage == ChannelStorage.Uniform && fluids.Palette[0] == 0))
+                for (int i = 0; i < ChunkLayout.Volume; i++)
+                    if (fluids.Get(i) != 0 && !registry.GetSolid(solids.Get(i)).PermitsFluid)
+                        throw new ArgumentException("Replica solid does not permit fluid.");
             if (previous != null && previous.Data.Revision == revision)
             {
                 for (int i = 0; i < ChunkLayout.Volume; i++)
-                    if (previous.Data.SolidAt(i) != solids[i] || previous.Data.FluidAt(i) != fluids[i])
+                    if (previous.Data.SolidAt(i) != solids.Get(i) || previous.Data.FluidAt(i) != fluids.Get(i))
                         throw new ArgumentException("Conflicting replica at the published revision.");
                 return true;
             }
@@ -318,7 +303,7 @@ namespace DigBlocks.Voxels.Runtime
                 if (before != faces[face]) changed |= (byte)(1 << face);
             }
             //build detached replacement first; failed validation/import leaves the published entity intact.
-            var data = ChunkData.FromChannels(address, incarnation, revision, solids, fluids);
+            var data = ChunkData.FromPacked(address, incarnation, revision, solids, fluids);
             Entity entity = previous?.Entity ?? Entity.Null;
             try
             {
@@ -337,6 +322,23 @@ namespace DigBlocks.Voxels.Runtime
             return true;
         }
 
+        //Direct storage carries values in its cells and has no palette to check, but it only appears
+        //when a chunk holds more distinct states than a palette may hold, which content never does.
+        private void ValidateStates(PackedChannelData channel, bool solid)
+        {
+            if (channel.Storage == ChannelStorage.Direct)
+            {
+                for (int i = 0; i < ChunkLayout.Volume; i++) Probe(channel.Get(i), solid);
+                return;
+            }
+            for (int i = 0; i < channel.PaletteCount; i++) Probe(channel.Palette[i], solid);
+        }
+
+        private void Probe(uint state, bool solid)
+        {
+            if (solid) registry.GetSolid(state); else registry.GetFluid(state);
+        }
+
         //solid values on one boundary plane, in the order ChunkMeshScheduler pads its neighbours.
         //Fluids are not meshed, so they cannot change a neighbour and are deliberately excluded.
         private static readonly ulong EmptyFaceHash = EmptyPlaneHash();
@@ -348,7 +350,7 @@ namespace DigBlocks.Voxels.Runtime
             return hash;
         }
 
-        private static void ComputeFaceHashes(ReadOnlySpan<uint> solids, ulong[] destination)
+        private static void ComputeFaceHashes(PackedChannelData solids, ulong[] destination)
         {
             for (int face = 0; face < 6; face++)
             {
@@ -366,7 +368,7 @@ namespace DigBlocks.Voxels.Runtime
                         case 4: x = 0; y = b; z = a; break;
                         default: x = ChunkLayout.Edge - 1; y = b; z = a; break;
                     }
-                    hash = (hash ^ solids[ChunkLayout.Index(new int3(x, y, z))]) * 1099511628211;
+                    hash = (hash ^ solids.Get(ChunkLayout.Index(new int3(x, y, z)))) * 1099511628211;
                 }
                 destination[face] = hash;
             }
@@ -436,85 +438,11 @@ namespace DigBlocks.Voxels.Runtime
             entry.Data.Dispose();
             if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity);
             chunks.Remove(lease.Address);
-            foreach (var item in snapshots) if (item.Address.Equals(lease.Address) && item.Incarnation == lease.Incarnation) item.Cancelled = true;
-        }
-        public bool TryRequestSnapshot(ChunkLease lease, out ulong id)
-        {
-            Validate(lease); id = 0;
-            if (snapshots.Count >= maxSnapshots) return false;
-            if (nextRequest == ulong.MaxValue) throw new InvalidOperationException("Snapshot request space exhausted.");
-            var capture = lease.Data.Capture();
-            var item = new Pending { Id = nextRequest++, Capture = capture, Address = capture.Address, Incarnation = capture.Incarnation, Revision = capture.Revision };
-            snapshots.Add(item); id = item.Id; return true;
-        }
-        public void PumpSnapshots()
-        {
-            RequireAlive();
-            for (int i = snapshots.Count - 1; i >= 0; i--)
-            {
-                var item = snapshots[i];
-                if (!item.Encoding)
-                {
-                    if (!item.Capture.IsCompleted) continue;
-                    if (!IsLive(item)) { Retire(i); continue; }
-                    uint[] solids = RentCells(), fluids = RentCells();
-                    item.Capture.CopySolids(solids); item.Capture.CopyFluids(fluids);
-                    var image = ChunkImage.FromOwnedChannels(item.Address, item.Incarnation, item.Revision, solids, fluids);
-                    item.Capture.Dispose(); item.Capture = null; item.Encoding = true;
-                    //no Unity APIs or native chunk allocations are accessed from this worker.
-                    if (!ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        var result = new SnapshotResult { RequestId = item.Id, Address = item.Address, Incarnation = item.Incarnation, Revision = item.Revision };
-                        try { result.Payload = ChunkWireCodec.EncodeSnapshot(image); }
-                        catch (Exception exception) { result.Error = exception; }
-                        finally { ReturnCells(solids); ReturnCells(fluids); }
-                        item.Result = result; item.Done.Set();
-                    }))
-                    {
-                        ReturnCells(solids); ReturnCells(fluids);
-                        item.Result = new SnapshotResult { RequestId = item.Id, Error = new InvalidOperationException("Could not queue snapshot worker.") };
-                        item.Done.Set();
-                    }
-                }
-                if (item.Done.IsSet && !IsLive(item)) Retire(i);
-            }
-        }
-        private uint[] RentCells() => cellBuffers.TryTake(out var buffer) ? buffer : new uint[ChunkLayout.Volume];
-
-        private void ReturnCells(uint[] buffer)
-        {
-            //bounded so a burst cannot leave the pool holding more than the pipeline can use again.
-            if (cellBuffers.Count < maxSnapshots * 2 + 2) cellBuffers.Add(buffer);
-        }
-
-        public bool TryTakeSnapshot(out SnapshotResult result)
-        {
-            RequireAlive(); result = null;
-            for (int i = 0; i < snapshots.Count; i++)
-            {
-                var item = snapshots[i];
-                if (!item.Encoding || !item.Done.IsSet) continue;
-                if (IsLive(item)) result = item.Result;
-                Retire(i--);
-                if (result != null) return true;
-            }
-            return false;
-        }
-        public void CancelSnapshot(ulong id)
-        { if (disposed) return; RequireAlive(); foreach (var item in snapshots) if (item.Id == id) item.Cancelled = true; }
-        private bool IsLive(Pending item) => !item.Cancelled && chunks.TryGetValue(item.Address, out var entry) && entry.Data.Incarnation == item.Incarnation;
-        private void Retire(int index)
-        {
-            var item = snapshots[index];
-            item.Capture?.Dispose();
-            if (item.Encoding) item.Done.Wait();
-            item.Done.Dispose(); snapshots.RemoveAt(index);
         }
         public void Dispose()
         {
             if (disposed) return;
             RequireAlive();
-            for (int i = snapshots.Count - 1; i >= 0; i--) Retire(i);
             foreach (var entry in chunks.Values)
             { entry.Data.Dispose(); if (manager.Exists(entry.Entity)) manager.DestroyEntity(entry.Entity); }
             chunks.Clear(); disposed = true;
@@ -531,13 +459,13 @@ namespace DigBlocks.Voxels.Runtime
     public partial class ChunkWorldSystem : SystemBase
     {
         public ResidentChunkStore Store { get; private set; }
-        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256, int maxSnapshots = 16)
+        public ResidentChunkStore Configure(BlockRegistry registry, int maxResidents = 256)
         {
             if (Store != null) throw new InvalidOperationException("World already has a chunk store.");
-            return Store = new ResidentChunkStore(EntityManager, registry, maxResidents, maxSnapshots);
+            return Store = new ResidentChunkStore(EntityManager, registry, maxResidents);
         }
         public void ReleaseStore() { Store?.Dispose(); Store = null; }
-        protected override void OnUpdate() => Store?.PumpSnapshots();
+        protected override void OnUpdate() { }
         protected override void OnDestroy() => ReleaseStore();
     }
 }

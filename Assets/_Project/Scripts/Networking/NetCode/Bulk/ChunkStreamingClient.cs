@@ -33,9 +33,8 @@ namespace DigBlocks.Networking.NetCode
         private readonly HashSet<ulong> retired = new();
         private ulong retiredFloor, highestSeen;
         //applies are strictly sequential and the store copies out before the call returns, so one pair of
-        //buffers serves every snapshot instead of allocating two 128 KiB arrays per chunk.
-        private readonly uint[] scratchSolids = new uint[ChunkLayout.Volume];
-        private readonly uint[] scratchFluids = new uint[ChunkLayout.Volume];
+        //buffers serves every snapshot instead of allocating per chunk.
+        private readonly PackedChannelData scratchSolids = new(), scratchFluids = new();
         private byte[] interestRequest;
         private double deadline;
         private int retries;
@@ -121,7 +120,7 @@ namespace DigBlocks.Networking.NetCode
             else
             {
                 //snapshots are the whole of a load, so they go straight from the wire into the store
-                //through reused buffers, with no intermediate image to allocate and collect.
+                //through reused buffers, in the layout both ends already hold them in.
                 ChunkWireCodec.DecodeSnapshotInto(payload, maxSolid, maxFluid, scratchSolids, scratchFluids,
                     out var address, out ulong incarnation, out ulong revision);
                 if (!address.Equals(declaration.Address) || incarnation != declaration.Incarnation || revision != declaration.Revision)

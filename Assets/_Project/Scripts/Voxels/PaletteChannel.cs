@@ -65,8 +65,10 @@ namespace DigBlocks.Voxels
             }
 
             var channel = default(PaletteChannel);
-            channel.palette = new NativeList<uint>(order.Count, Allocator.Persistent);
-            for (int i = 0; i < order.Count; i++) channel.palette.Add(order[i]);
+            bool direct = order.Count > MaxPaletteEntries;
+            //Direct storage holds raw values in its cells, so it carries no palette at all.
+            channel.palette = new NativeList<uint>(direct ? 0 : order.Count, Allocator.Persistent);
+            if (!direct) for (int i = 0; i < order.Count; i++) channel.palette.Add(order[i]);
 
             if (order.Count == 1)
             {
@@ -77,7 +79,6 @@ namespace DigBlocks.Voxels
                 return channel;
             }
 
-            bool direct = order.Count > MaxPaletteEntries;
             channel.Storage = direct ? ChannelStorage.Direct : ChannelStorage.Indirect;
             channel.BitsPerEntry = direct ? DirectBits : BitsFor(order.Count);
             int wordCount = WordCount(channel.BitsPerEntry);
@@ -88,7 +89,7 @@ namespace DigBlocks.Voxels
             if (direct) for (int i = 0; i < values.Length; i++) Write(packed, i, values[i], DirectBits);
             else for (int i = 0; i < values.Length; i++) Write(packed, i, entries[i], channel.BitsPerEntry);
 
-            //Direct storage holds raw values and needs no reverse map; the promote path disposes it too.
+            //Direct storage needs no reverse map either; the promote path disposes it too.
             if (direct) channel.lookup = default;
             else
             {
@@ -135,6 +136,43 @@ namespace DigBlocks.Voxels
                 lookup.Add(value, entry);
             }
             Write(words.AsArray(), index, (uint)entry, BitsPerEntry);
+        }
+
+        /// <summary>Copies the channel out in the layout it already holds: a palette copy and a word copy.</summary>
+        public void CopyInto(PackedChannelData destination)
+        {
+            if (destination == null) throw new ArgumentNullException(nameof(destination));
+            destination.Storage = Storage;
+            destination.BitsPerEntry = BitsPerEntry;
+            destination.PaletteCount = palette.Length;
+            if (palette.Length != 0) NativeArray<uint>.Copy(palette.AsArray(), destination.Palette, palette.Length);
+            if (words.Length != 0) NativeArray<ulong>.Copy(words.AsArray(), destination.Words, words.Length);
+        }
+
+        /// <summary>Adopts an already packed channel. The caller must have validated it.</summary>
+        public static PaletteChannel FromPacked(PackedChannelData source)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            var channel = default(PaletteChannel);
+            channel.Storage = source.Storage;
+            channel.BitsPerEntry = source.BitsPerEntry;
+            channel.palette = new NativeList<uint>(Math.Max(1, source.PaletteCount), Allocator.Persistent);
+            for (int i = 0; i < source.PaletteCount; i++) channel.palette.Add(source.Palette[i]);
+            int wordCount = source.WordCount;
+            channel.words = new NativeList<ulong>(wordCount, Allocator.Persistent);
+            if (wordCount != 0)
+            {
+                channel.words.ResizeUninitialized(wordCount);
+                NativeArray<ulong>.Copy(source.Words, 0, channel.words.AsArray(), 0, wordCount);
+            }
+            //Uniform and Direct both index nothing, so neither needs the reverse map.
+            if (source.Storage != ChannelStorage.Indirect) channel.lookup = default;
+            else
+            {
+                channel.lookup = new NativeParallelHashMap<uint, int>(Math.Max(16, source.PaletteCount), Allocator.Persistent);
+                for (int i = 0; i < source.PaletteCount; i++) channel.lookup.TryAdd(source.Palette[i], i);
+            }
+            return channel;
         }
 
         public ReadView AsReadOnly() => new ReadView
@@ -186,8 +224,11 @@ namespace DigBlocks.Voxels
             var cells = scratchCells ??= new uint[ChunkLayout.Volume];
             var source = words.AsArray();
             for (int i = 0; i < ChunkLayout.Volume; i++) cells[i] = Read(source, i, BitsPerEntry);
-            words.Resize(WordCount(bits), NativeArrayOptions.ClearMemory);
+            //Resize only clears what it adds, and a wider entry can leave a word with padding bits
+            //where the narrower layout kept data, so every word is zeroed before it is refilled.
+            words.Resize(WordCount(bits), NativeArrayOptions.UninitializedMemory);
             var destination = words.AsArray();
+            for (int i = 0; i < destination.Length; i++) destination[i] = 0;
             BitsPerEntry = bits;
             for (int i = 0; i < ChunkLayout.Volume; i++) Write(destination, i, cells[i], bits);
         }
@@ -197,11 +238,13 @@ namespace DigBlocks.Voxels
             var cells = scratchCells ??= new uint[ChunkLayout.Volume];
             var source = words.AsArray();
             for (int i = 0; i < ChunkLayout.Volume; i++) cells[i] = palette[(int)Read(source, i, BitsPerEntry)];
-            words.Resize(WordCount(DirectBits), NativeArrayOptions.ClearMemory);
+            words.Resize(WordCount(DirectBits), NativeArrayOptions.UninitializedMemory);
             var destination = words.AsArray();
+            for (int i = 0; i < destination.Length; i++) destination[i] = 0;
             Storage = ChannelStorage.Direct;
             BitsPerEntry = DirectBits;
             for (int i = 0; i < ChunkLayout.Volume; i++) Write(destination, i, cells[i], DirectBits);
+            palette.Clear();
             lookup.Dispose();
             lookup = default;
         }

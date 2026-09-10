@@ -47,6 +47,28 @@ namespace DigBlocks.Voxels
             return new ChunkData(address, incarnation, loadedSolids, loadedFluids) { Revision = revision };
         }
 
+        /// <summary>Adopts channels already in the stored layout, so loading one is a copy.</summary>
+        public static ChunkData FromPacked(ChunkAddress address, ulong incarnation, ulong revision,
+            PackedChannelData solid, PackedChannelData fluid)
+        {
+            if (revision == 0) throw new ArgumentException("Invalid chunk image.");
+            if (incarnation == 0) throw new ArgumentOutOfRangeException(nameof(incarnation));
+            var loadedSolids = PaletteChannel.FromPacked(solid);
+            PaletteChannel loadedFluids;
+            try { loadedFluids = PaletteChannel.FromPacked(fluid); }
+            catch { loadedSolids.Dispose(); throw; }
+            return new ChunkData(address, incarnation, loadedSolids, loadedFluids) { Revision = revision };
+        }
+
+        /// <summary>Copies both channels out in the layout they are stored in, fencing outstanding readers.</summary>
+        public void CopyPacked(PackedChannelData solid, PackedChannelData fluid)
+        {
+            RequireAlive();
+            readers.Complete();
+            solids.CopyInto(solid);
+            fluids.CopyInto(fluid);
+        }
+
         private ChunkData(ChunkAddress address, ulong incarnation, PaletteChannel solid, PaletteChannel fluid)
         {
             Address = address; Incarnation = incarnation;

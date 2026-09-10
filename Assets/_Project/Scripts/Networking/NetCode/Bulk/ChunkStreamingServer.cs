@@ -17,11 +17,10 @@ namespace DigBlocks.Networking.NetCode
         public double ProgressTimeout { get; }
         public uint WorldId { get; }
         public int PeerWindow { get; }
-        public int SnapshotWorkers { get; }
         public int AppliesPerTick { get; }
         public ChunkStreamingOptions(int horizontalRadius = 1, int verticalRadius = 0,
             int globalBytesPerTick = 262144, int peerBytesPerTick = 131072, int maxPayloads = 64, double progressTimeout = 10,
-            uint worldId = 1, int peerWindow = 8, int snapshotWorkers = 16, int appliesPerTick = 2)
+            uint worldId = 1, int peerWindow = 8, int appliesPerTick = 2)
         {
             if (worldId == 0) throw new ArgumentOutOfRangeException(nameof(worldId));
             _ = new ChunkInterest(1, new ChunkAddress(worldId, default), horizontalRadius, verticalRadius);
@@ -31,12 +30,11 @@ namespace DigBlocks.Networking.NetCode
             if (peerWindow < 1 || peerWindow > 64) throw new ArgumentOutOfRangeException(nameof(peerWindow));
             //a peer can never hold more in flight than the shared payload budget allows.
             peerWindow = Math.Min(peerWindow, maxPayloads);
-            if (snapshotWorkers < 1 || snapshotWorkers > 64) throw new ArgumentOutOfRangeException(nameof(snapshotWorkers));
             if (appliesPerTick < 1 || appliesPerTick > 64) throw new ArgumentOutOfRangeException(nameof(appliesPerTick));
             if (!(progressTimeout >= 1 && progressTimeout <= 120)) throw new ArgumentOutOfRangeException(nameof(progressTimeout));
             HorizontalRadius = horizontalRadius; VerticalRadius = verticalRadius; GlobalBytesPerTick = globalBytesPerTick;
             PeerBytesPerTick = peerBytesPerTick; MaxPayloads = maxPayloads; ProgressTimeout = progressTimeout; WorldId = worldId;
-            PeerWindow = peerWindow; SnapshotWorkers = snapshotWorkers; AppliesPerTick = appliesPerTick;
+            PeerWindow = peerWindow; AppliesPerTick = appliesPerTick;
         }
     }
 
@@ -50,7 +48,6 @@ namespace DigBlocks.Networking.NetCode
         private readonly Func<ulong, int> sliceCapacity;
         private readonly Dictionary<ulong, Peer> peers = new();
         private readonly List<ulong> order = new();
-        private readonly Dictionary<ulong, Transfer> requests = new();
         private readonly List<Transfer> expired = new();
         private int cursor;
         private ulong nextTransfer = 1;
@@ -62,8 +59,8 @@ namespace DigBlocks.Networking.NetCode
         public double MaxAppliedAckSeconds { get; private set; }
         public int PeakEncodedPayloadBytes { get; private set; }
 
-        //payload slots held across every peer: an encode in flight or an encoded payload still being sliced.
-        //This is the memory bound on the transfer stage and stays capped by options.MaxPayloads.
+        //encoded payloads still being sliced, across every peer. This is the memory bound on the
+        //transfer stage and stays capped by options.MaxPayloads.
         public int PayloadCount
         {
             get
@@ -71,7 +68,7 @@ namespace DigBlocks.Networking.NetCode
                 int count = 0;
                 foreach (var peer in peers.Values)
                     foreach (var transfer in peer.Transfers)
-                        if (transfer.RequestId != 0 || transfer.Payload != null) count++;
+                        if (transfer.Payload != null) count++;
                 return count;
             }
         }
@@ -94,7 +91,7 @@ namespace DigBlocks.Networking.NetCode
         private sealed class Transfer
         {
             public Peer Owner;
-            public ulong Id, RequestId, Incarnation, Revision;
+            public ulong Id, Incarnation, Revision;
             public int LeaseIndex, Offset;
             public ChunkAddress Address;
             public byte[] Payload;
@@ -172,19 +169,6 @@ namespace DigBlocks.Networking.NetCode
         public void Tick(double now)
         {
             if (disposed) return;
-            store.PumpSnapshots();
-            while (store.TryTakeSnapshot(out var result))
-            {
-                if (!requests.Remove(result.RequestId, out var transfer)) continue;
-                var peer = transfer.Owner;
-                transfer.RequestId = 0;
-                if (result.Error != null) { peer.Failed = true; fail(peer.Id); continue; }
-                var lease = peer.Leases[transfer.LeaseIndex];
-                if (!result.Address.Equals(lease.Address) || result.Incarnation != lease.Incarnation)
-                { peer.Transfers.Remove(transfer); continue; }
-                transfer.Revision = result.Revision;
-                Prepare(peer, transfer, result.Payload, false, now);
-            }
             int budget = options.GlobalBytesPerTick;
             int count = order.Count;
             if (count == 0) return;
@@ -237,16 +221,19 @@ namespace DigBlocks.Networking.NetCode
                     Owner = peer, LeaseIndex = index, Address = lease.Address, Incarnation = lease.Incarnation,
                     Deadline = now + options.ProgressTimeout, Began = now
                 };
+                peer.Transfers.Add(transfer);
                 if (store.TryGetDelta(lease, peer.Baselines[index], out var delta))
                 {
-                    peer.Transfers.Add(transfer); transfer.Revision = delta.ResultRevision;
+                    transfer.Revision = delta.ResultRevision;
                     Prepare(peer, transfer, ChunkWireCodec.EncodeDelta(delta), true, now);
                 }
-                else if (store.TryRequestSnapshot(lease, out ulong request))
+                else
                 {
-                    transfer.RequestId = request; requests.Add(request, transfer); peer.Transfers.Add(transfer);
+                    //encoding is a palette copy and a word copy now, so it happens here rather than
+                    //going to a worker and coming back a tick or more later.
+                    transfer.Revision = lease.Revision;
+                    Prepare(peer, transfer, store.EncodeSnapshot(lease), false, now);
                 }
-                else break;
                 buffered++;
             }
         }
@@ -338,19 +325,13 @@ namespace DigBlocks.Networking.NetCode
 
         private void Retire(Peer peer, Transfer transfer)
         {
-            if (transfer.RequestId != 0) { store.CancelSnapshot(transfer.RequestId); requests.Remove(transfer.RequestId); }
-            transfer.RequestId = 0; transfer.Payload = null;
+            transfer.Payload = null;
             peer.Transfers.Remove(transfer);
             if (peer.Transfers.Count == 0) peer.RoundRobin = 0;
         }
 
         private void CancelAll(Peer peer)
         {
-            for (int i = peer.Transfers.Count - 1; i >= 0; i--)
-            {
-                var transfer = peer.Transfers[i];
-                if (transfer.RequestId != 0) { store.CancelSnapshot(transfer.RequestId); requests.Remove(transfer.RequestId); }
-            }
             peer.Transfers.Clear(); peer.RoundRobin = 0;
         }
 
@@ -364,7 +345,7 @@ namespace DigBlocks.Networking.NetCode
         {
             if (disposed) return;
             foreach (var peer in peers.Values) { CancelAll(peer); foreach (var lease in peer.Leases) lease.Dispose(); }
-            peers.Clear(); order.Clear(); requests.Clear(); disposed = true;
+            peers.Clear(); order.Clear(); disposed = true;
         }
     }
 }

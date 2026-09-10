@@ -68,8 +68,8 @@ namespace DigBlocks.Networking.NetCode.Tests
             using var serverWorld = new World("Throughput server");
             using var clientWorld = new World("Throughput client");
             var registry = Registry();
-            var store = serverWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry, 512, options.SnapshotWorkers);
-            var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry, 512, options.SnapshotWorkers);
+            var store = serverWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry, 512);
+            var replica = clientWorld.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(registry, 512);
             replica.EnableReplicas();
 
             var toClient = new Queue<byte[]>();

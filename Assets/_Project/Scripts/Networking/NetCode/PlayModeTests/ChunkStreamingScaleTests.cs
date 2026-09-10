@@ -64,13 +64,12 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 lease.Apply(edits);
                 long beforeBytes = server.SentChunkBytes, beforeAck = server.AppliedChunkAcknowledgements;
                 double began = Time.realtimeSinceStartupAsDouble;
-                var appliedAt = new double[peerCount]; int observedPayloads = 0, observedCaptures = 0;
+                var appliedAt = new double[peerCount]; int observedPayloads = 0;
                 long managedPeak = GC.GetTotalMemory(false), unityPeak = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
                 for (int i = 0; i < peerCount; i++) Assert.That(server.SetServerInterest(sessions[i].LocalPeerId, lease.Address, 0, 0), Is.True);
                 await Until(() =>
                 {
                     observedPayloads = Math.Max(observedPayloads, server.PendingChunkPayloads);
-                    observedCaptures = Math.Max(observedCaptures, source.PendingSnapshots);
                     managedPeak = Math.Max(managedPeak, GC.GetTotalMemory(false));
                     unityPeak = Math.Max(unityPeak, UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong());
                     bool complete = true;
@@ -91,9 +90,9 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                     for (int i = 0; i < ChunkLayout.Volume; i++)
                     { Assert.That(image.SolidAt(i), Is.EqualTo(lease.SolidAt(i))); Assert.That(image.FluidAt(i), Is.EqualTo(lease.FluidAt(i))); }
                 }
-                Assert.That(observedPayloads, Is.LessThanOrEqualTo(options.MaxPayloads)); Assert.That(observedCaptures, Is.LessThanOrEqualTo(options.SnapshotWorkers));
+                Assert.That(observedPayloads, Is.LessThanOrEqualTo(options.MaxPayloads));
                 Assert.That(source.Count, Is.EqualTo(1));
-                TestContext.WriteLine(FormattableString.Invariant($"STREAMING_METRICS peers={peerCount} impaired={impaired} bytes={server.SentChunkBytes - beforeBytes} first_apply_s={fastest:F3} last_apply_s={slowest:F3} max_ack_s={server.MaxAppliedAckSeconds:F3} peak_encoded_bytes={server.PeakEncodedPayloadBytes} payload_slots={observedPayloads} capture_slots={observedCaptures} process_managed_peak={managedPeak} unity_allocated_peak={unityPeak}"));
+                TestContext.WriteLine(FormattableString.Invariant($"STREAMING_METRICS peers={peerCount} impaired={impaired} bytes={server.SentChunkBytes - beforeBytes} first_apply_s={fastest:F3} last_apply_s={slowest:F3} max_ack_s={server.MaxAppliedAckSeconds:F3} peak_encoded_bytes={server.PeakEncodedPayloadBytes} payload_slots={observedPayloads} process_managed_peak={managedPeak} unity_allocated_peak={unityPeak}"));
             }
             finally { for (int i = hosts.Count - 1; i >= 0; i--) await hosts[i].StopAsync(CancellationToken.None); }
         });
