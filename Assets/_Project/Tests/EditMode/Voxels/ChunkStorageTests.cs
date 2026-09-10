@@ -30,9 +30,12 @@ namespace DigBlocks.Voxels.Tests
                 channel.Set(7, 80000);
                 Assert.That(channel.Get(0), Is.EqualTo(90000u));
                 Assert.That(channel.Get(7), Is.EqualTo(80000u));
-                Assert.That(channel.Storage, Is.EqualTo(ChannelStorage.Palette8));
+                //two values need one bit each; the channel only widens when the palette outgrows the width.
+                Assert.That(channel.Storage, Is.EqualTo(ChannelStorage.Indirect));
+                Assert.That(channel.BitsPerEntry, Is.EqualTo(1));
                 for (int i = 0; i < 300; i++) channel.Set(i, (uint)i);
-                Assert.That(channel.Storage, Is.EqualTo(ChannelStorage.Palette16));
+                Assert.That(channel.Storage, Is.EqualTo(ChannelStorage.Indirect));
+                Assert.That(channel.BitsPerEntry, Is.EqualTo(PaletteChannel.BitsFor(302)));
                 for (int i = 0; i < 300; i++) Assert.That(channel.Get(i), Is.EqualTo((uint)i));
                 Assert.That(channel.Get(301), Is.EqualTo(90000u));
             }
@@ -45,10 +48,12 @@ namespace DigBlocks.Voxels.Tests
             var channel = new PaletteChannel(uint.MaxValue);
             try
             {
-                for (int i = 0; i < 4096; i++) channel.Set(i, (uint)i);
+                //one past what an indirect palette is allowed to hold, so the channel carries values directly.
+                for (int i = 0; i < PaletteChannel.MaxPaletteEntries; i++) channel.Set(i, (uint)i);
                 Assert.That(channel.Storage, Is.EqualTo(ChannelStorage.Direct));
+                Assert.That(channel.BitsPerEntry, Is.EqualTo(PaletteChannel.DirectBits));
                 for (int i = 0; i < ChunkLayout.Volume; i++)
-                    Assert.That(channel.Get(i), Is.EqualTo(i < 4096 ? (uint)i : uint.MaxValue));
+                    Assert.That(channel.Get(i), Is.EqualTo(i < PaletteChannel.MaxPaletteEntries ? (uint)i : uint.MaxValue));
                 channel.Set(1, 0xABCDEF12);
                 Assert.That(channel.AsReadOnly().Get(1), Is.EqualTo(0xABCDEF12));
             }

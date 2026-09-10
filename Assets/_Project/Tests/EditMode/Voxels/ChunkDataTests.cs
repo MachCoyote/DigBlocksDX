@@ -114,19 +114,25 @@ namespace DigBlocks.Voxels.Tests
             for (int i = 0; i < small.Length; i++) small[i] = (uint)(i % 5);
             Check(small, 900, 1000);
 
-            //exactly fills the one-byte entry width, so the next write must widen the channel
+            //two values fit one bit, the narrowest packed width there is
+            var pair = new uint[ChunkLayout.Volume];
+            for (int i = 0; i < pair.Length; i++) pair[i] = (uint)(i & 1);
+            Check(pair, 900, 1000);
+
+            //exactly fills the chosen entry width, so the next write must widen the channel
             var boundary = new uint[ChunkLayout.Volume];
             for (int i = 0; i < boundary.Length; i++) boundary[i] = (uint)(i % 256);
             Check(boundary, 999, 999);
 
+            //a width that does not divide 64, so words carry padding bits the packing must not disturb
             var wide = new uint[ChunkLayout.Volume];
             for (int i = 0; i < wide.Length; i++) wide[i] = (uint)(i % 300);
             Check(wide, 5000, 5000);
 
-            //more distinct values than the palette holds, so cells carry values directly
+            //more distinct values than an indirect palette may hold, so cells carry values directly
             var dense = new uint[ChunkLayout.Volume];
-            for (int i = 0; i < dense.Length; i++) dense[i] = (uint)(i % 5000);
-            Check(dense, 4999, 4999);
+            for (int i = 0; i < dense.Length; i++) dense[i] = (uint)(i % (PaletteChannel.MaxPaletteEntries + 4000));
+            Check(dense, 4999, PaletteChannel.MaxPaletteEntries + 4000);
         }
 
         [Test]
