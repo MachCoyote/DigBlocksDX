@@ -20,12 +20,17 @@ namespace DigBlocks.Voxels.Content.Tests
             Assert.That(registry.LookupSolid("digblocks:air"), Is.Zero);
             Assert.That(registry.LookupFluid("digblocks:empty"), Is.Zero);
             Assert.That(registry.LookupSolid("digblocks:bedrock"), Is.EqualTo(1));
-            Assert.That(registry.LookupSolid("digblocks:dirt"), Is.EqualTo(2));
-            Assert.That(registry.LookupSolid("digblocks:grass_block"), Is.EqualTo(3));
-            Assert.That(registry.LookupSolid("digblocks:stone"), Is.EqualTo(4));
-            Assert.That(registry.LookupSolid("digblocks:testblock"), Is.EqualTo(5));
-            Assert.That(registry.MaxSolidStateId, Is.EqualTo(5));
-            Assert.That(registry.MaxFluidStateId, Is.Zero);
+            Assert.That(registry.LookupSolid("digblocks:cobblestone"), Is.EqualTo(2));
+            Assert.That(registry.LookupSolid("digblocks:dirt"), Is.EqualTo(3));
+            Assert.That(registry.LookupSolid("digblocks:grass_block"), Is.EqualTo(4));
+            Assert.That(registry.LookupSolid("digblocks:gravel"), Is.EqualTo(5));
+            Assert.That(registry.LookupSolid("digblocks:sand"), Is.EqualTo(6));
+            Assert.That(registry.LookupSolid("digblocks:stone"), Is.EqualTo(7));
+            Assert.That(registry.LookupSolid("digblocks:testblock"), Is.EqualTo(8));
+            Assert.That(registry.MaxSolidStateId, Is.EqualTo(8));
+            //water is the first authored fluid, after the reserved empty state.
+            Assert.That(registry.LookupFluid("digblocks:water"), Is.EqualTo(1));
+            Assert.That(registry.MaxFluidStateId, Is.EqualTo(1));
             Assert.That(registry.Fingerprint, Does.Match("^[0-9a-f]{64}$"));
         }
 
@@ -72,7 +77,7 @@ namespace DigBlocks.Voxels.Content.Tests
             var registry = content.Registry;
             Assert.That(content.Materials.Count, Is.EqualTo(1));
             Assert.That(content.Materials[0].Key, Is.EqualTo("digblocks:opaque"));
-            Assert.That(content.Materials[0].SliceCount, Is.EqualTo(6));
+            Assert.That(content.Materials[0].SliceCount, Is.EqualTo(14));
 
             ushort Slice(string key, BlockFace face) =>
                 content.SolidAppearanceOf(registry.LookupSolid(key)).Faces[(int)face].Texture;
@@ -84,6 +89,14 @@ namespace DigBlocks.Voxels.Content.Tests
             Assert.That(Slice("digblocks:grass_block", BlockFace.North), Is.EqualTo(2));
             Assert.That(Slice("digblocks:grass_block", BlockFace.Down), Is.EqualTo(3));
             Assert.That(Slice("digblocks:bedrock", BlockFace.North), Is.EqualTo(5));
+            Assert.That(Slice("digblocks:gravel", BlockFace.North), Is.EqualTo(13));
+            //sand borrows the cobblestone slice until it has art of its own, so these two match on purpose.
+            Assert.That(Slice("digblocks:sand", BlockFace.North), Is.EqualTo(8));
+            Assert.That(Slice("digblocks:cobblestone", BlockFace.North), Is.EqualTo(8));
+
+            //water is generated into the fluid channel but nothing meshes fluids yet, so it carries no
+            //appearance. Giving it one now would fail the renderer's opaque-only material check.
+            Assert.That(content.FluidAppearanceOf(registry.LookupFluid("digblocks:water")).IsVisible, Is.False);
 
             //only the grass top is tinted, and air carries no appearance row at all.
             var grass = content.SolidAppearanceOf(registry.LookupSolid("digblocks:grass_block"));

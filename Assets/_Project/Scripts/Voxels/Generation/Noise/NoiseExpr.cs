@@ -75,6 +75,33 @@ namespace DigBlocks.Voxels.Generation
         public NoiseExpr Unsigned() => Remap(-1f, 1f, 0f, 1f);
 
         /// <summary>
+        /// Spreads a field out over its full range without clipping it.
+        /// <para>
+        /// Fractal noise is an average of octaves, so its values crowd around zero and only brush the
+        /// ends of [-1, 1]. A spline authored across that whole range would therefore only ever be
+        /// asked about its middle. This maps the field through <c>x / (|x| + softness)</c>, which is
+        /// smooth, monotone and never saturates: smaller <paramref name="softness"/> spreads harder.
+        /// Apply it before authoring anything that reads the field as though it spanned [-1, 1].
+        /// </para>
+        /// </summary>
+        public NoiseExpr Spread(float softness = 0.4f)
+        {
+            if (!(softness > 0f)) throw new ArgumentOutOfRangeException(nameof(softness));
+            return this / (Abs() + Constant(softness));
+        }
+
+        /// <summary>
+        /// Folds a field about zero, so what were its zero crossings become crests: <c>1 - 2|x|</c>.
+        /// Ridges rather than blobs, which is what makes a mountain range read as a range.
+        /// <para>
+        /// Worth applying after <see cref="Spread"/> rather than using a ridged fractal mode. Folding a
+        /// field that crowds around zero puts almost everything near the crest, which lifts the whole
+        /// world instead of shaping it.
+        /// </para>
+        /// </summary>
+        public NoiseExpr Ridge() => Constant(1f) - Abs() * Constant(2f);
+
+        /// <summary>
         /// Maps this field through an authored curve, so a noise value's <em>meaning</em> is authored
         /// rather than merely scaled. This is what puts genuinely flat plains next to sharp mountains
         /// without needing a second noise field to choose between them.

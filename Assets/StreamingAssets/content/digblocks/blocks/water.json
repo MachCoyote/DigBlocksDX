@@ -1,0 +1,11 @@
+{
+  "key": "digblocks:water",
+  "channel": "fluid",
+  "invisible": true,
+  "opaque": false,
+  "fullCube": false,
+  "collides": false,
+  "replaceable": true,
+  "hardness": 0.0,
+  "blastResistance": 100.0
+}

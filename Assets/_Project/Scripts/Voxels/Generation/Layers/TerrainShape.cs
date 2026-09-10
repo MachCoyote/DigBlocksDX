@@ -22,7 +22,7 @@ namespace DigBlocks.Voxels.Generation
         public NoiseExpr Continentalness { get; }
         /// <summary>High is worn flat, low is rugged. What separates a plateau from a mountain range.</summary>
         public NoiseExpr Erosion { get; }
-        /// <summary>Local sharpness, ridged so its crests are lines rather than blobs.</summary>
+        /// <summary>Local sharpness, folded so its crests are lines rather than blobs.</summary>
         public NoiseExpr PeaksAndValleys { get; }
         /// <summary>The warped coordinates the fields were sampled at, for anything sampled alongside them.</summary>
         public NoiseExpr X { get; }
@@ -52,10 +52,14 @@ namespace DigBlocks.Voxels.Generation
                 ? (NoiseExpr.X, NoiseExpr.Z)
                 : NoiseExpr.Warp2D(name + ".warp", NoiseExpr.X, NoiseExpr.Z, 1f / (260f * scale), warpStrength * scale);
 
+            //every field is spread before it is handed out, so all three genuinely span [-1, 1] and a
+            //spline authored across that range is asked about all of it rather than only its middle.
+            //Peaks is folded after spreading rather than sampled with a ridged fractal mode, because
+            //folding a field that still crowds around zero puts nearly every column on a crest.
             return new TerrainShape(
-                NoiseExpr.Perlin2D(name + ".continentalness", x, z, 1f / (900f * scale), 4),
-                NoiseExpr.Perlin2D(name + ".erosion", x, z, 1f / (420f * scale), 3),
-                NoiseExpr.Perlin2D(name + ".peaks", x, z, 1f / (110f * scale), 3, mode: FbmMode.Ridged),
+                NoiseExpr.Perlin2D(name + ".continentalness", x, z, 1f / (900f * scale), 4).Spread(0.30f),
+                NoiseExpr.Perlin2D(name + ".erosion", x, z, 1f / (420f * scale), 3).Spread(0.34f),
+                NoiseExpr.Perlin2D(name + ".peaks", x, z, 1f / (110f * scale), 3).Spread(0.34f).Ridge(),
                 x, z);
         }
     }

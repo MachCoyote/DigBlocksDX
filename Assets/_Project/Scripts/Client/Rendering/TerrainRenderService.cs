@@ -80,8 +80,11 @@ namespace DigBlocks.Client.Rendering
                 camera.nearClipPlane = 0.1f; camera.farClipPlane = settings.RenderDistance + 64;
                 camera.backgroundColor = new Color(0.45f, 0.67f, 0.9f);
                 camera.GetUniversalAdditionalCameraData().renderPostProcessing = false;
-                camera.transform.position = new Vector3(62, 48, -62);
-                camera.transform.LookAt(new Vector3(8, 6, 8));
+                //the development free camera starts above the generated world rather than at a fixed
+                //low height, because generated terrain sits around its layer's root rather than at the
+                //origin and a camera below the surface sees the inside of the ground, which is nothing.
+                camera.transform.position = new Vector3(110, 128, -110);
+                camera.transform.LookAt(new Vector3(0, 72, 0));
                 defaultBackground = camera.backgroundColor; defaultClearFlags = camera.clearFlags;
                 view = root.AddComponent<TerrainView>();
                 view.Initialize(camera, renderer, inputAvailable);

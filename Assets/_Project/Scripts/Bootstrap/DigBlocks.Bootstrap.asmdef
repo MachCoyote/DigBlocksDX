@@ -12,6 +12,7 @@
     "DigBlocks.Voxels",
     "DigBlocks.Voxels.Runtime",
     "DigBlocks.Voxels.Content",
+    "DigBlocks.Voxels.Generation",
     "UniTask",
     "Unity.Entities",
     "Unity.Collections",

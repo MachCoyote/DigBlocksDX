@@ -1,0 +1,7 @@
+{
+  "key": "digblocks:sand",
+  "archetype": "digblocks:soil",
+  "texture": 8,
+  "hardness": 0.5,
+  "sounds": "digblocks:sound/sand"
+}

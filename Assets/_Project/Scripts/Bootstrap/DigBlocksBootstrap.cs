@@ -14,6 +14,7 @@ using UnityEngine;
 using DigBlocks.Client.Rendering;
 using DigBlocks.Client.Runtime;
 using System.Collections.Generic;
+using DigBlocks.Voxels.Generation;
 
 namespace DigBlocks.Bootstrap
 {
@@ -38,7 +39,17 @@ namespace DigBlocks.Bootstrap
         [Tooltip("World the play action enters until world selection exists.")]
         private string developmentWorldId = "dev";
 
-        [SerializeField] private bool useTerrainFixture = true;
+        [SerializeField]
+        [Tooltip("World type the play action generates until world creation exists.")]
+        private string worldType = "digblocks:classic";
+
+        [SerializeField]
+        [Tooltip("World seed. Empty or 0 picks one at random; text that is not a number is hashed.")]
+        private string worldSeed = string.Empty;
+
+        [SerializeField]
+        [Tooltip("Generate terrain for the development world. Off leaves every chunk empty.")]
+        private bool generateTerrain = true;
 
         private CancellationTokenSource lifetimeCancellation;
         private ClientPresentation presentation;
@@ -219,8 +230,19 @@ namespace DigBlocks.Bootstrap
             var content = BlockContentProvider.Load();
             var streamingSettings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
             var streamingOptions = streamingSettings != null ? streamingSettings.CreateOptions() : new ChunkStreamingOptions();
-            var source = useTerrainFixture ? new TerrainFixtureChunkSource(content.Registry, streamingOptions.WorldId) : null;
-            var services = new List<IGameService>(GameServiceComposer.Compose(launch, logger, network, source));
+            GeneratedTerrainChunkSource terrain = null;
+            if (generateTerrain)
+            {
+                var definition = BuiltInGenerators.ResolveOrDefault(worldType);
+                var seed = GenSeed.Parse(worldSeed);
+                terrain = new GeneratedTerrainChunkSource(definition, seed,
+                    GeneratorSettings.Defaults(definition.Schema), content.Registry, streamingOptions.WorldId);
+                logger.Log($"World '{definition.DisplayName}' generating from seed {seed}.");
+            }
+            var services = new List<IGameService>(GameServiceComposer.Compose(launch, logger, network, terrain));
+            //the generator owns native memory, so it has to be stopped with the session. It goes ahead
+            //of the companion that pulls from it, and services stop in reverse.
+            if (terrain != null) services.Insert(0, terrain);
             ClientRuntime client = null;
             ChunkCompanionService companion = null;
             foreach (var service in services)

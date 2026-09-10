@@ -1,0 +1,7 @@
+{
+  "key": "digblocks:gravel",
+  "archetype": "digblocks:soil",
+  "texture": 13,
+  "hardness": 0.6,
+  "drops": "digblocks:drop/gravel"
+}
