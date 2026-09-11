@@ -43,12 +43,20 @@ success while running nothing:
   the whole suite (~450 tests, roughly two minutes). Almost every assembly registers as PlayMode
   regardless of living under `Tests/EditMode/`; an unfiltered EditMode run finds only the handful
   of Editor-platform tests.
-* **A filtered run poisons every later unfiltered run in that editor session.** Afterwards the
-  unfiltered suite returns `total: 0` in milliseconds instead of running. Nothing clears this
-  except restarting Unity: not `clear_stuck`, not `manage_editor` `stop`. A run that times out
-  wedges it the same way and also strands the editor in Play Mode. So treat a filtered run as
-  spending the rest of the session's full runs, and reach for one only when iterating on a single
-  known failure.
+* **Reload the domain before every PlayMode run; only the first run per domain executes.** A
+  second PlayMode run in the same domain returns `total: 0` in about three seconds and still
+  reports `resultState: "Passed"`, with nothing in the console to say otherwise. So begin each
+  PlayMode run with `refresh_unity` (`mode: force`, `scope: scripts`, `compile: request`,
+  `wait_for_ready: true`); it costs about fifteen seconds. Filters have nothing to do with this --
+  two identical unfiltered runs reproduce it. EditMode is unaffected and repeats freely.
+  The cause is two packages disagreeing: the MCP runner disables domain reload on entering Play
+  Mode so its bridge survives the transition (and this project sets `DisableDomainReload`
+  globally besides), while the Unity Test Framework assumes that reload is what resets its
+  per-run state -- it never mentions `EnterPlayModeOptions`, and `PlaymodeLauncher.IsRunning` is
+  set true by `MarkRunAsPlayModeTask` and never cleared in code. A manual reload while the editor
+  is idle is safe and the bridge reconnects; only a reload landing mid-run strands the response,
+  which is why the runner suppresses the automatic one. A run that times out wedges the domain
+  the same way and also strands the editor in Play Mode.
 * **`test_names` needs a complete `Namespace.Class.TestMethod`.** A namespace or class prefix
   matches nothing, and `assembly_names` does not match this project's assemblies at all. One named
   test runs in about twenty seconds, which is the fast loop worth having while debugging.
