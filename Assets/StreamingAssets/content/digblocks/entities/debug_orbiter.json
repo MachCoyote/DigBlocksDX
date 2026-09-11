@@ -1,0 +1,15 @@
+{
+  "key": "digblocks:debug_orbiter",
+  "archetype": "digblocks:mob",
+  "model": "digblocks:models/debug_cube",
+  "category": "marker",
+  "width": 0.6,
+  "height": 0.6,
+  "persists": false,
+  "gravity": false,
+  "collides": false,
+  "living": false,
+  "behaviors": [
+    "digblocks:circle_flight"
+  ]
+}

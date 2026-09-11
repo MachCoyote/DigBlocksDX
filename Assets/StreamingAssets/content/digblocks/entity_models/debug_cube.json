@@ -1,0 +1,14 @@
+{
+  "key": "digblocks:models/debug_cube",
+  "texture": "digblocks:entity/debug",
+  "textureSize": [64, 32],
+  "boxes": [
+    {
+      "name": "body",
+      "pivot": [0, 0, 0],
+      "origin": [-4.8, 0, -4.8],
+      "size": [9.6, 9.6, 9.6],
+      "uv": [0, 0]
+    }
+  ]
+}

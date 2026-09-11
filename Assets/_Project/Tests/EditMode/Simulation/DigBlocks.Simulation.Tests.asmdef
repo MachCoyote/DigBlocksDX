@@ -2,6 +2,8 @@
   "name": "DigBlocks.Simulation.Tests",
   "references": [
     "DigBlocks.Simulation",
+    "DigBlocks.Simulation.Content",
+    "DigBlocks.Voxels.Content",
     "DigBlocks.Voxels",
     "Unity.Entities",
     "Unity.Transforms",

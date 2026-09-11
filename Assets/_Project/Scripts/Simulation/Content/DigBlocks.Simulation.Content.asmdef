@@ -1,0 +1,15 @@
+{
+  "name": "DigBlocks.Simulation.Content",
+  "rootNamespace": "DigBlocks.Simulation.Content",
+  "references": [
+    "DigBlocks.Simulation",
+    "DigBlocks.Voxels",
+    "DigBlocks.Voxels.Content",
+    "Unity.Mathematics"
+  ],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "allowUnsafeCode": false
+}

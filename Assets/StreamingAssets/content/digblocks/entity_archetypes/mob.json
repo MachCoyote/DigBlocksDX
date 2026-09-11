@@ -1,0 +1,11 @@
+{
+  "key": "digblocks:mob",
+  "category": "mob",
+  "persists": true,
+  "gravity": true,
+  "collides": true,
+  "living": true,
+  "ghostMode": "interpolated",
+  "ghostOptimization": "dynamic",
+  "ghostImportance": 1
+}
