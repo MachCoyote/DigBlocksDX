@@ -159,7 +159,7 @@ namespace DigBlocks.Networking.NetCode.Tests
                 () => Assert.Fail($"{label}: client failure"), 0);
 
             int expected = new ChunkInterest(1, new ChunkAddress(options.WorldId, default), options.HorizontalRadius, options.VerticalRadius).Count;
-            Assert.That(server.Add(1, 0), Is.True);
+            Assert.That(server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True);
 
             double serverSeconds = 0, clientSeconds = 0, receiveSeconds = 0;
             double worstServer = 0, worstClient = 0;

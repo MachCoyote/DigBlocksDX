@@ -23,8 +23,10 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         //the companion's own default streaming distance, so the shape of the interest owns this number.
         private static readonly int DefaultResidency = (int)ChunkInterest.CountFor(
             new ChunkStreamingOptions().HorizontalRadius, new ChunkStreamingOptions().VerticalRadius);
-        //the disjoint interest the late-join test moves one peer to: a single column, three high.
-        private static readonly int DisjointResidency = (int)ChunkInterest.CountFor(0, 1);
+        //the disjoint interest the late-join test moves one peer to. Vertical radius stays 0 because
+        //these peers bind with the default streaming options, and a peer is never given more layers
+        //than the view distance it declared: its renderer has slots for exactly that many.
+        private static readonly int DisjointResidency = (int)ChunkInterest.CountFor(0, 0);
         private readonly List<GameHost> hosts = new();
         private readonly NullLogger logger = new();
         //Single player runs both worlds in one process, so a chunk can be handed straight across rather
@@ -66,7 +68,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
 
             //turning it off mid-session must route the chunks that arrive next over the wire instead.
             direct = false;
-            Assert.That(bulk.SetServerInterest(session.LocalPeerId, new ChunkAddress(1, new Unity.Mathematics.int3(0, 4, 0)), 0, 1), Is.True);
+            Assert.That(bulk.SetServerInterest(session.LocalPeerId, new ChunkAddress(1, new Unity.Mathematics.int3(0, 4, 0)), 0, 0), Is.True);
             await Until(() => replica.InterestEpoch == 2 && bulk.ClientDataReady);
             Assert.That(bulk.SentChunkSnapshots, Is.EqualTo(DisjointResidency), "The wire path should have carried these.");
             Assert.That(bulk.DirectChunkDeliveries, Is.EqualTo(deliveredSoFar), "Nothing more should have gone direct.");
@@ -144,7 +146,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(secondReplica.TryReadReplica(address, out var late), Is.True);
             Assert.That(late.Revision, Is.EqualTo(lease.Revision)); Assert.That(late.SolidAt(42), Is.EqualTo(1));
             Assert.That(source.Count, Is.EqualTo(DefaultResidency));
-            Assert.That(bulk.SetServerInterest(firstSession.LocalPeerId, new ChunkAddress(2, new Unity.Mathematics.int3(-4, 3, -8)), 0, 1), Is.True);
+            Assert.That(bulk.SetServerInterest(firstSession.LocalPeerId, new ChunkAddress(2, new Unity.Mathematics.int3(-4, 3, -8)), 0, 0), Is.True);
             var firstReplica = firstSession.ClientWorld.GetExistingSystemManaged<ChunkWorldSystem>().Store;
             await Until(() => firstReplica.InterestEpoch == 2 && first.ClientDataReady);
             Assert.That(firstReplica.Count, Is.EqualTo(DisjointResidency));
@@ -267,7 +269,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 if (pair.Value == session.LocalPeerId) generation = SessionContext.ConnectionKey(pair.Key);
             Assert.That(generation, Is.Not.Zero);
             Assert.That(attacker.TrySend(connection, BulkBindingFrames.EncodeRequest(new BulkBindRequest(session.LocalPeerId, generation,
-                new BulkTicket(1, 2), 32, BlockRegistry.CreateDummy().Fingerprint))), Is.True);
+                new BulkTicket(1, 2), 32, 12, 4, BlockRegistry.CreateDummy().Fingerprint))), Is.True);
             while (!rejected && Time.realtimeSinceStartupAsDouble < deadline)
             {
                 attacker.Update(); while (attacker.TryPopEvent(out var item)) rejected |= item.Type == BulkEventType.Disconnected;
@@ -371,9 +373,9 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var connection = await ConnectRaw(raw, offer.Port);
             var ticket = new BulkTicket(offer.TicketHigh, offer.TicketLow);
             await Exchange(raw, connection, BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation + 1,
-                ticket, offer.Edge, offer.Fingerprint.ToString())), false);
+                ticket, offer.Edge, 12, 4, offer.Fingerprint.ToString())), false);
             connection = await ConnectRaw(raw, offer.Port);
-            var request = BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation, ticket, offer.Edge, offer.Fingerprint.ToString()));
+            var request = BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation, ticket, offer.Edge, 12, 4, offer.Fingerprint.ToString()));
             var accepted = await Exchange(raw, connection, request, true);
             BulkBindingFrames.DecodeAccepted(accepted, out ulong peer, out ulong generation);
             Assert.That(peer, Is.EqualTo(offer.PeerId)); Assert.That(generation, Is.EqualTo(offer.Generation));
@@ -392,7 +394,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             using var raw = new BulkDriver(false, false, NetworkEndpoint.LoopbackIpv4.WithPort(0));
             var connection = await ConnectRaw(raw, offer.Port);
             await Exchange(raw, connection, BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation,
-                new BulkTicket(offer.TicketHigh, offer.TicketLow), offer.Edge, new string('0', 64))), false);
+                new BulkTicket(offer.TicketHigh, offer.TicketLow), offer.Edge, 12, 4, new string('0', 64))), false);
             await Until(() => session.LastFailure != NetworkFailure.None && serverSession.Peers.Count == 0);
             Assert.That(session.LastFailure, Is.EqualTo(NetworkFailure.ChunkRegistryMismatch));
             Assert.That(server.BoundPeerCount, Is.Zero);
@@ -407,7 +409,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             using var raw = new BulkDriver(false, false, NetworkEndpoint.LoopbackIpv4.WithPort(0));
             var connection = await ConnectRaw(raw, offer.Port);
             var request = BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation,
-                new BulkTicket(offer.TicketHigh, offer.TicketLow), offer.Edge, offer.Fingerprint.ToString()));
+                new BulkTicket(offer.TicketHigh, offer.TicketLow), offer.Edge, 12, 4, offer.Fingerprint.ToString()));
             await Exchange(raw, connection, request, true);
             Assert.That(raw.TrySend(connection, new byte[] { byte.MaxValue }), Is.True);
             double deadline = Time.realtimeSinceStartupAsDouble + 5;

@@ -134,7 +134,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             using var server = new ChunkStreamingServer(store,
                 new ChunkStreamingOptions(1, 0, peerWindow: 8),
                 (_, packet) => { packets.Add(packet); return true; }, _ => failed = true);
-            Assert.That(server.Add(1, 0), Is.True);
+            Assert.That(server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True);
             server.Tick(0);
 
             var starts = new List<TransferStart>();
@@ -180,7 +180,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var options = new ChunkStreamingOptions(1, 0);
             using var server = new ChunkStreamingServer(store, options, (_, packet) => { serverPackets.Add(packet); return true; }, _ => Assert.Fail());
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { clientPackets.Add(packet); return true; }, () => Assert.Fail(), 0);
-            Assert.That(server.Add(1, 0), Is.True);
+            Assert.That(server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True);
             var requested = new ChunkAddress(1, new int3(-3, 2, 5));
             Assert.That(client.RequestInterest(requested), Is.True);
             client.Tick(0);
@@ -197,6 +197,58 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.Throws<ArgumentException>(() => server.Receive(1,
                 ChunkTransferFrames.EncodeInterestRequest(new ChunkAddress(2, default)), 0));
         }
+
+        //view distance is negotiated rather than dictated: a client that asks for less is not forced up
+        //to the server's distance, and one that asks for more is held to what the server serves. The
+        //client half matters because the renderer sizes its chunk slots from the client's own setting.
+        [Test]
+        public void ServedViewDistanceIsTheSmallerOfTheClientAndTheServerConfiguration()
+        {
+            using var world = new World("Negotiated view distance");
+            var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(BlockRegistry.CreateDummy(), 2048);
+            var packets = new Dictionary<ulong, List<byte[]>>();
+            var options = new ChunkStreamingOptions(2, 1);
+            using var server = new ChunkStreamingServer(store, options, (id, packet) =>
+            {
+                if (!packets.TryGetValue(id, out var list)) packets.Add(id, list = new List<byte[]>());
+                list.Add(packet); return true;
+            }, _ => Assert.Fail());
+
+            Assert.That(server.Add(1, 1, 0, 0), Is.True, "A client below the server's distance.");
+            Assert.That(server.Add(2, 4, 2, 0), Is.True, "A client above the server's distance.");
+            server.Tick(0);
+
+            var modest = Declaration(packets, 1);
+            Assert.That(modest.HorizontalRadius, Is.EqualTo(1)); Assert.That(modest.VerticalRadius, Is.Zero);
+            var greedy = Declaration(packets, 2);
+            Assert.That(greedy.HorizontalRadius, Is.EqualTo(2)); Assert.That(greedy.VerticalRadius, Is.EqualTo(1));
+
+            //an anchor move re-derives the interest, so the ceiling has to survive it rather than only
+            //applying to the interest a peer is admitted with.
+            server.Receive(1, ChunkTransferFrames.EncodeInterestRequest(new ChunkAddress(1, new int3(4, 0, 4))), 0);
+            server.Tick(0);
+            var moved = Declaration(packets, 1);
+            Assert.That(moved.Anchor.Position, Is.EqualTo(new int3(4, 0, 4)));
+            Assert.That(moved.HorizontalRadius, Is.EqualTo(1)); Assert.That(moved.VerticalRadius, Is.Zero);
+
+            //server-side code may direct a peer's interest past the server's own default distance, but
+            //never past what the client said it can hold: the client's renderer has exactly that many
+            //chunk slots, so overshooting it would alias two live chunks onto one.
+            Assert.That(server.SetInterest(1, new ChunkAddress(1, new int3(8, 0, 8)), 5, 3, 0), Is.True);
+            server.Tick(0);
+            var directed = Declaration(packets, 1);
+            Assert.That(directed.HorizontalRadius, Is.EqualTo(1), "Held to the client's ceiling.");
+            Assert.That(directed.VerticalRadius, Is.Zero);
+            Assert.That(server.SetInterest(2, new ChunkAddress(1, new int3(8, 0, 8)), 4, 2, 0), Is.True);
+            server.Tick(0);
+            var roomier = Declaration(packets, 2);
+            Assert.That(roomier.HorizontalRadius, Is.EqualTo(4), "This client can hold more than the server's default.");
+            Assert.That(roomier.VerticalRadius, Is.EqualTo(2));
+        }
+
+        private static ChunkInterest Declaration(Dictionary<ulong, List<byte[]>> packets, ulong peer) =>
+            ChunkTransferFrames.DecodeInterest(packets[peer].FindLast(
+                packet => ChunkTransferFrames.ReadKind(packet) == ChunkFrameKind.Interest));
 
         [UnityTest]
         public IEnumerator MovingOneChunkRetainsOverlappingReplicasAndStreamsOnlyTheNewOnes()
@@ -221,7 +273,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 inbound.Enqueue(packet); return true;
             }, _ => Assert.Fail());
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail(), 0);
-            Assert.That(server.Add(1, 0), Is.True);
+            Assert.That(server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True);
             for (int tick = 0; tick < 500 && server.AppliedAcknowledgements < resident; tick++)
             {
                 server.Tick(tick * 0.01);
@@ -294,7 +346,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             var options = new ChunkStreamingOptions(0, 0, progressTimeout: 1);
             using var server = new ChunkStreamingServer(store, options, (_, packet) => { inbound.Enqueue(packet); return true; }, _ => Assert.Fail("Unexpected server failure"));
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail("Unexpected client failure"), 0);
-            server.Add(1, 0);
+            server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0);
             for (int tick = 0; tick < 100 && replies.Count == 0; tick++)
             {
                 server.Tick(0);
@@ -336,7 +388,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             using var server = new ChunkStreamingServer(store, options, (peer, packet) =>
             { if (peer == 1) return false; inbound.Enqueue(packet); return true; }, peer => failed.Add(peer));
             using var client = new ChunkStreamingClient(replica, registry, options, packet => { replies.Enqueue(packet); return true; }, () => Assert.Fail("Healthy client failed"), 0);
-            Assert.That(server.Add(1, 0), Is.True); Assert.That(server.Add(2, 0), Is.True);
+            Assert.That(server.Add(1, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True); Assert.That(server.Add(2, ChunkInterest.MaximumRadius, ChunkInterest.MaximumRadius, 0), Is.True);
             Assert.That(server.SetInterest(1, new ChunkAddress(2, default), 0, 0, 0), Is.True);
             for (int tick = 0; tick < 100 && server.AppliedAcknowledgements == 0; tick++)
             {

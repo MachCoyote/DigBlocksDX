@@ -99,6 +99,14 @@ namespace DigBlocks.Networking.NetCode
         private sealed class Peer
         {
             public ulong Id;
+            //what the client declared at binding. A hard ceiling on every interest this peer is ever
+            //given, because its renderer sizes its chunk slots from exactly this and cannot hold more.
+            public int ClientHorizontalRadius, ClientVerticalRadius;
+            //the view distance actually served by default: the smaller of the client's and this
+            //server's. Server-side code may still direct a peer's interest within the client ceiling,
+            //so this bounds what the peer is admitted with and what it may ask for, not what the
+            //server may choose to give it.
+            public int NegotiatedHorizontalRadius, NegotiatedVerticalRadius;
             public ChunkInterest Interest;
             public ChunkLease[] Leases = Array.Empty<ChunkLease>();
             public ulong[] Baselines = Array.Empty<ulong>();
@@ -135,10 +143,20 @@ namespace DigBlocks.Networking.NetCode
 
         public long DirectDeliveries { get; private set; }
 
-        public bool Add(ulong id, double now)
+        //the client's configured view distance arrives with its binding request. Serving it the smaller
+        //of the two distances keeps a low-specced client from being handed more than it can hold, and
+        //keeps a client from claiming more of this server than it is configured to give.
+        public bool Add(ulong id, int clientHorizontalRadius, int clientVerticalRadius, double now)
         {
-            var peer = new Peer { Id = id };
-            if (!SetInterest(peer, new ChunkAddress(options.WorldId, default), options.HorizontalRadius, options.VerticalRadius, now)) return false;
+            var peer = new Peer
+            {
+                Id = id,
+                ClientHorizontalRadius = clientHorizontalRadius,
+                ClientVerticalRadius = clientVerticalRadius,
+                NegotiatedHorizontalRadius = Math.Min(clientHorizontalRadius, options.HorizontalRadius),
+                NegotiatedVerticalRadius = Math.Min(clientVerticalRadius, options.VerticalRadius)
+            };
+            if (!SetInterest(peer, new ChunkAddress(options.WorldId, default), peer.NegotiatedHorizontalRadius, peer.NegotiatedVerticalRadius, now)) return false;
             peers.Add(id, peer); order.Add(id); return true;
         }
 
@@ -148,6 +166,10 @@ namespace DigBlocks.Networking.NetCode
         private bool SetInterest(Peer peer, ChunkAddress anchor, int horizontal, int vertical, double now)
         {
             if (peer.Failed) return false;
+            //the single choke point for the client's ceiling, so no caller can route around it and hand
+            //a peer more chunks than it has slots for.
+            horizontal = Math.Min(horizontal, peer.ClientHorizontalRadius);
+            vertical = Math.Min(vertical, peer.ClientVerticalRadius);
             if (peer.Interest != null && peer.Interest.Anchor.Equals(anchor) && peer.Interest.HorizontalRadius == horizontal &&
                 peer.Interest.VerticalRadius == vertical) return true;
             var interest = new ChunkInterest(checked((peer.Interest?.Epoch ?? 0) + 1), anchor, horizontal, vertical);
@@ -172,7 +194,7 @@ namespace DigBlocks.Networking.NetCode
             {
                 var anchor = ChunkTransferFrames.DecodeInterestRequest(packet);
                 if (anchor.World != options.WorldId) throw new ArgumentException("Client interest requested the wrong world.", nameof(packet));
-                if (!SetInterest(peer, anchor, options.HorizontalRadius, options.VerticalRadius, now))
+                if (!SetInterest(peer, anchor, peer.NegotiatedHorizontalRadius, peer.NegotiatedVerticalRadius, now))
                     throw new InvalidOperationException("Server chunk residency capacity exhausted.");
                 return;
             }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using DigBlocks.ChunkProtocol;
 namespace DigBlocks.Networking.NetCode
 {
     public readonly struct BulkBindRequest
@@ -8,9 +9,16 @@ namespace DigBlocks.Networking.NetCode
         public readonly ulong PeerId, Generation;
         public readonly BulkTicket Ticket;
         public readonly ushort Edge;
+        //the client's own configured view distance. The server streams min(this, its own), so a client
+        //never receives more than it is built to hold and is never forced past what it asked for.
+        public readonly ushort HorizontalRadius, VerticalRadius;
         public readonly string Fingerprint;
-        public BulkBindRequest(ulong peerId, ulong generation, BulkTicket ticket, ushort edge, string fingerprint)
-        { PeerId = peerId; Generation = generation; Ticket = ticket; Edge = edge; Fingerprint = fingerprint; }
+        public BulkBindRequest(ulong peerId, ulong generation, BulkTicket ticket, ushort edge,
+            ushort horizontalRadius, ushort verticalRadius, string fingerprint)
+        {
+            PeerId = peerId; Generation = generation; Ticket = ticket; Edge = edge;
+            HorizontalRadius = horizontalRadius; VerticalRadius = verticalRadius; Fingerprint = fingerprint;
+        }
     }
     public static class BulkBindingFrames
     {
@@ -18,22 +26,29 @@ namespace DigBlocks.Networking.NetCode
         {
             if (request.PeerId == 0 || request.Generation == 0 || request.Ticket.Equals(default) || request.Edge == 0 || !ValidFingerprint(request.Fingerprint))
                 throw new ArgumentException("Invalid companion binding request.");
+            if (request.HorizontalRadius > ChunkInterest.MaximumRadius || request.VerticalRadius > ChunkInterest.MaximumRadius)
+                throw new ArgumentException("Binding request exceeds the interest radius limit.");
             using var stream = new MemoryStream(); using var writer = new BinaryWriter(stream);
             Header(writer, 1); writer.Write(request.PeerId); writer.Write(request.Generation);
             writer.Write(request.Ticket.High); writer.Write(request.Ticket.Low); writer.Write(request.Edge);
+            writer.Write(request.HorizontalRadius); writer.Write(request.VerticalRadius);
             for (int i = 0; i < 64; i += 2) writer.Write((byte)((Hex(request.Fingerprint[i]) << 4) | Hex(request.Fingerprint[i + 1])));
             return stream.ToArray();
         }
         public static BulkBindRequest DecodeRequest(byte[] packet)
         {
-            using var reader = Open(packet, 1, 70);
+            using var reader = Open(packet, 1, 74);
             ulong peer = reader.ReadUInt64(), generation = reader.ReadUInt64();
             var ticket = new BulkTicket(reader.ReadUInt64(), reader.ReadUInt64());
             ushort edge = reader.ReadUInt16();
+            ushort horizontal = reader.ReadUInt16(), vertical = reader.ReadUInt16();
             var hash = new StringBuilder(64);
             for (int i = 0; i < 32; i++) hash.Append(reader.ReadByte().ToString("x2"));
             if (peer == 0 || generation == 0 || ticket.Equals(default) || edge == 0) throw new FormatException("Invalid companion credentials.");
-            return new BulkBindRequest(peer, generation, ticket, edge, hash.ToString());
+            //a peer chooses its own view distance, so this is validated rather than trusted.
+            if (horizontal > ChunkInterest.MaximumRadius || vertical > ChunkInterest.MaximumRadius)
+                throw new FormatException("Binding request exceeds the interest radius limit.");
+            return new BulkBindRequest(peer, generation, ticket, edge, horizontal, vertical, hash.ToString());
         }
         public static byte[] EncodeAccepted(ulong peerId, ulong generation)
         {

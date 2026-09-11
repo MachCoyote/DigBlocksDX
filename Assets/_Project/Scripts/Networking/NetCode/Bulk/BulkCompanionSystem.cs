@@ -267,7 +267,7 @@ namespace DigBlocks.Networking.NetCode
             pending.Remove(item.Connection); peer.Connection = item.Connection; bound.Add(item.Connection, request.PeerId);
             if (!driver.TrySend(item.Connection, BulkBindingFrames.EncodeAccepted(request.PeerId, peer.Generation)))
             { FailPeer(request.PeerId, NetworkFailure.ChunkChannelFailed); RemovePeer(request.PeerId); return; }
-            if (!streamingServer.Add(request.PeerId, Now))
+            if (!streamingServer.Add(request.PeerId, request.HorizontalRadius, request.VerticalRadius, Now))
             { FailPeer(request.PeerId, NetworkFailure.ChunkChannelFailed); RemovePeer(request.PeerId); }
         }
         private void ClientEvent(BulkDriverEvent item)
@@ -283,7 +283,9 @@ namespace DigBlocks.Networking.NetCode
             if (item.Type == BulkEventType.Connected)
             {
                 if (!driver.TrySend(clientConnection, BulkBindingFrames.EncodeRequest(new BulkBindRequest(offer.PeerId, offer.Generation,
-                    new BulkTicket(offer.TicketHigh, offer.TicketLow), ChunkLayout.Edge, registry.Fingerprint)))) FailClient(NetworkFailure.ChunkChannelFailed);
+                    new BulkTicket(offer.TicketHigh, offer.TicketLow), ChunkLayout.Edge,
+                    (ushort)streamingOptions.HorizontalRadius, (ushort)streamingOptions.VerticalRadius,
+                    registry.Fingerprint)))) FailClient(NetworkFailure.ChunkChannelFailed);
                 return;
             }
             if (State == ChunkConnectionState.Bound)
