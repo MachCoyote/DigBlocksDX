@@ -23,7 +23,8 @@ namespace DigBlocks.Bootstrap.Tests
                 typeof(ServerRuntime),
                 typeof(ClientRuntime),
                 typeof(NetCodeSession),
-                typeof(ChunkCompanionService)
+                typeof(ChunkCompanionService),
+                typeof(EntityGhostService)
             }));
         }
 
@@ -37,7 +38,8 @@ namespace DigBlocks.Bootstrap.Tests
                 typeof(DiagnosticService),
                 typeof(ClientRuntime),
                 typeof(NetCodeSession),
-                typeof(ChunkCompanionService)
+                typeof(ChunkCompanionService),
+                typeof(EntityGhostService)
             }));
         }
 
@@ -51,7 +53,8 @@ namespace DigBlocks.Bootstrap.Tests
                 typeof(DiagnosticService),
                 typeof(ServerRuntime),
                 typeof(NetCodeSession),
-                typeof(ChunkCompanionService)
+                typeof(ChunkCompanionService),
+                typeof(EntityGhostService)
             }));
         }
 

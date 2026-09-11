@@ -226,9 +226,18 @@ A custom transform ghost variant replicates `Sector` as an unquantized `int3` an
 position: `Sector` changes rarely and delta-compresses to almost nothing, `Local`
 stays small so it Huffman-compresses well, and neither can overflow.
 
-One trap: the client must convert to its render frame before interpolating
-between snapshots. Lerping `Local` across a snapshot where `Sector` changed would
-teleport the entity across a sector.
+One trap, and it is currently a known limitation rather than a solved problem.
+NetCode interpolates each ghost field independently, so it lerps `Local` while
+`Sector` snaps. Across a sector boundary the offset wraps, and the reconstructed
+position jumps for one tick. `Sector` is therefore replicated with
+`SmoothingAction.Clamp`, which keeps it exact but does not remove the seam.
+
+The fix is a custom ghost field template, which NetCode explicitly supports: the
+generated `CopyFromSnapshot` receives both snapshots, so it can reconstruct each
+into a continuous value and interpolate that instead. That is the recorded
+follow-up. It is not on the path to the first mob, which orbits near the origin
+and crosses no boundary, and the artifact only appears when an entity crosses one
+of these planes while a client is close enough to watch.
 
 ### Simulation frames
 

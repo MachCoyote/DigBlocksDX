@@ -4,6 +4,7 @@
     "DigBlocks.Client",
     "DigBlocks.Core",
     "DigBlocks.Server",
+    "DigBlocks.Simulation",
     "DigBlocks.Networking",
     "DigBlocks.Networking.NetCode",
     "DigBlocks.Voxels",

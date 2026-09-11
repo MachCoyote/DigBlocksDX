@@ -4,6 +4,7 @@
   "references": [
     "DigBlocks.Core",
     "DigBlocks.Networking",
+    "DigBlocks.Simulation",
     "DigBlocks.Voxels",
     "DigBlocks.Voxels.Runtime",
     "DigBlocks.ChunkProtocol",
@@ -11,6 +12,7 @@
     "UniTask",
     "Unity.Collections",
     "Unity.Entities",
+    "Unity.Transforms",
     "Unity.NetCode",
     "Unity.Networking.Transport"
   ],

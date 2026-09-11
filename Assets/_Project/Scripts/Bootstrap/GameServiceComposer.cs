@@ -43,6 +43,9 @@ namespace DigBlocks.Bootstrap
             var streamingOptions = streamingSettings != null ? streamingSettings.CreateOptions() : new ChunkStreamingOptions();
             services.Add(new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry,
                 streamingOptions: streamingOptions, authoritativeSource: authoritativeChunkSource));
+            //after the companion: ghost prefabs describe entities that live in the world the chunk
+            //stores own, and services stop in reverse.
+            services.Add(new EntityGhostService(session, EntityContentProvider.Load().Registry));
             return services;
         }
     }
