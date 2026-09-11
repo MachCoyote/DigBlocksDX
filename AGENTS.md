@@ -33,6 +33,30 @@ Use Unity MCP for live-editor checks when it adds value. Treat it as optional; p
 
 When inspecting Unity results, start with structured test summaries, errors, warnings, and bounded log excerpts. Do not print complete logs by default.
 
+### Running tests through Unity MCP
+
+The editor is normally left open on this project, so the CLI commands above abort on the project
+lock and tests have to go through MCP instead. That runner has three traps, all of which report
+success while running nothing:
+
+* **Run the unfiltered PlayMode suite first.** `run_tests` with `mode: PlayMode` and no filter is
+  the whole suite (~450 tests, roughly two minutes). Almost every assembly registers as PlayMode
+  regardless of living under `Tests/EditMode/`; an unfiltered EditMode run finds only the handful
+  of Editor-platform tests.
+* **A filtered run poisons every later unfiltered run in that editor session.** Afterwards the
+  unfiltered suite returns `total: 0` in milliseconds instead of running. Nothing clears this
+  except restarting Unity: not `clear_stuck`, not `manage_editor` `stop`. A run that times out
+  wedges it the same way and also strands the editor in Play Mode. So treat a filtered run as
+  spending the rest of the session's full runs, and reach for one only when iterating on a single
+  known failure.
+* **`test_names` needs a complete `Namespace.Class.TestMethod`.** A namespace or class prefix
+  matches nothing, and `assembly_names` does not match this project's assemblies at all. One named
+  test runs in about twenty seconds, which is the fast loop worth having while debugging.
+
+`total: 0` is a failed run, never a pass. Check the count against the suite size before believing
+a green result, and read the console immediately after `refresh_unity` and before starting tests,
+because a test run clears the console and a compile failure then looks like a clean build.
+
 ## Architectural constraints
 
 * Use Unity Entities/ECS as the primary gameplay simulation model.
