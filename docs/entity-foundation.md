@@ -665,6 +665,29 @@ Each step is independently verifiable, and each leaves the project working.
   precedent for declaring replication for a component whose assembly knows
   nothing about netcode.
 
+### Two bugs the tests did not have
+
+Both surfaced only when the game was actually run, and both were in code paths the
+tests reached a different way. Recorded because the shape of the gap is the lesson.
+
+**A `DefaultVariantSystemBase` must not advertise itself to the default world.**
+`OnCreate` reaches for `GhostComponentSerializerCollectionSystemGroup`, which
+exists only in a NetCode world, so `WorldSystemFilterFlags.Default` put the system
+in the plain world Unity builds on entering and leaving play mode, where that
+lookup returns null. Every test created NetCode worlds directly and so never built
+the default world at all. The filter now matches what NetCode's own variant
+systems declare, and a test asserts it keeps matching, which is the version of
+that assertion that survives a package update.
+
+**Spawning cannot happen while the request query is being iterated.**
+Instantiating a prefab is a structural change, and `ServerDebugSpawnSystem` was
+doing it inside the loop over incoming RPCs. Every existing test called
+`EntitySpawn.Spawn` directly from test code, which runs outside any query, so the
+RPC path, the one the debug key actually takes, had no coverage at all. Requests
+are now collected during iteration and spawned after it, and `DebugSpawnTests`
+drives the real path including several requests in one tick, which is the case
+that makes the ordering unavoidable rather than incidental.
+
 ### Dead ends worth not repeating
 
 Two findings from building the position encoding, recorded because each cost real
