@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using DigBlocks.Simulation;
 using Unity.Collections;
 using Unity.Entities;
@@ -74,6 +75,12 @@ namespace DigBlocks.Networking.NetCode
     [UpdateAfter(typeof(EntityGhostPrefabSystem))]
     public partial class ServerDebugSpawnSystem : SystemBase
     {
+        //accepted requests, held until the query is done with. Spawning instantiates a prefab and
+        //adds behaviour components, and structural changes are not allowed while a query is being
+        //iterated, so the two phases have to stay apart.
+        private readonly List<(ulong PeerId, ushort TypeId, SpawnDebugEntityRpc Command)> accepted =
+            new List<(ulong, ushort, SpawnDebugEntityRpc)>();
+
         protected override void OnCreate() => RequireForUpdate<SessionActive>();
 
         protected override void OnUpdate()
@@ -82,37 +89,43 @@ namespace DigBlocks.Networking.NetCode
             var prefabs = World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
             bool permitted = SystemAPI.HasSingleton<DebugSpawnPermitted>();
 
-            using var commands = new EntityCommandBuffer(Allocator.Temp);
-            foreach (var (request, spawn, entity) in
-                SystemAPI.Query<RefRO<ReceiveRpcCommandRequest>, RefRO<SpawnDebugEntityRpc>>().WithEntityAccess())
+            accepted.Clear();
+            using (var commands = new EntityCommandBuffer(Allocator.Temp))
             {
-                commands.DestroyEntity(entity);
-                if (context == null || context.Stopping) continue;
-                //the same admission check the in-game gate applies: an unadmitted connection is not
-                //a peer, whatever it sends.
-                if (!context.ServerConnections.ContainsKey(request.ValueRO.SourceConnection)) continue;
-                if (!permitted)
+                foreach (var (request, spawn, entity) in
+                    SystemAPI.Query<RefRO<ReceiveRpcCommandRequest>, RefRO<SpawnDebugEntityRpc>>().WithEntityAccess())
                 {
-                    context.Logger.Log("Refused a debug spawn: this session does not permit them.", Core.Hosting.GameLogLevel.Warning);
-                    continue;
-                }
-                if (prefabs?.Registry == null || !prefabs.Built) continue;
+                    commands.DestroyEntity(entity);
+                    if (context == null || context.Stopping) continue;
+                    //the same admission check the in-game gate applies: an unadmitted connection is
+                    //not a peer, whatever it sends.
+                    if (!context.ServerConnections.TryGetValue(request.ValueRO.SourceConnection, out ulong peerId)) continue;
+                    if (!permitted)
+                    {
+                        context.Logger.Log("Refused a debug spawn: this session does not permit them.", Core.Hosting.GameLogLevel.Warning);
+                        continue;
+                    }
+                    if (prefabs?.Registry == null || !prefabs.Built) continue;
 
-                var command = spawn.ValueRO;
-                if (!prefabs.Registry.TryGetId(command.TypeKey.ToString(), out ushort typeId))
-                {
-                    context.Logger.Log($"Refused a debug spawn: unknown entity type '{command.TypeKey}'.", Core.Hosting.GameLogLevel.Warning);
-                    continue;
+                    var command = spawn.ValueRO;
+                    if (!prefabs.Registry.TryGetId(command.TypeKey.ToString(), out ushort typeId))
+                    {
+                        context.Logger.Log($"Refused a debug spawn: unknown entity type '{command.TypeKey}'.", Core.Hosting.GameLogLevel.Warning);
+                        continue;
+                    }
+                    accepted.Add((peerId, typeId, command));
                 }
+                commands.Playback(EntityManager);
+            }
 
-                //played back immediately rather than through the buffer, because the spawn helper
-                //reads the prefab's registry entry and adds behaviour components as it goes.
+            for (int i = 0; i < accepted.Count; i++)
+            {
+                var (peerId, typeId, command) = accepted[i];
                 Entity spawned = EntitySpawn.Spawn(EntityManager, prefabs, typeId,
                     new WorldPosition(command.Sector, command.Local), command.Radius, command.AngularSpeed, command.Height);
-                if (spawned != Entity.Null)
-                    context.Logger.Log($"Spawned {command.TypeKey} for peer {context.ServerConnections[request.ValueRO.SourceConnection]}.");
+                if (spawned != Entity.Null) context.Logger.Log($"Spawned {command.TypeKey} for peer {peerId}.");
             }
-            commands.Playback(EntityManager);
+            accepted.Clear();
         }
     }
 }

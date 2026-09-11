@@ -9,10 +9,17 @@ namespace DigBlocks.Networking.NetCode
     /// <summary>
     /// Project-wide replication defaults.
     /// </summary>
-    [WorldSystemFilter(WorldSystemFilterFlags.Default | WorldSystemFilterFlags.Editor)]
+    //Exactly the worlds NetCode's own variant systems run in, and no others. DefaultVariantSystemBase
+    //reaches for GhostComponentSerializerCollectionSystemGroup in OnCreate, which only exists in a
+    //NetCode world; including WorldSystemFilterFlags.Default put this in the plain default world that
+    //Unity creates for the editor, where that lookup returns null and OnCreate throws.
+    [WorldSystemFilter(WorldSystemFilterFlags.ServerSimulation | WorldSystemFilterFlags.ClientSimulation |
+                       WorldSystemFilterFlags.ThinClientSimulation | WorldSystemFilterFlags.BakingSystem)]
+    [CreateAfter(typeof(GhostComponentSerializerCollectionSystemGroup))]
     //NetCode's own TransformDefaultVariantSystem claims LocalTransform, and the later rule wins only
     //if it is registered first, so this must be created before it.
     [CreateBefore(typeof(TransformDefaultVariantSystem))]
+    [UpdateInGroup(typeof(DefaultVariantSystemGroup), OrderLast = true)]
     public sealed partial class DigBlocksDefaultVariantSystem : DefaultVariantSystemBase
     {
         protected override void RegisterDefaultVariants(Dictionary<ComponentType, Rule> defaultVariants)
