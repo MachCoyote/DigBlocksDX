@@ -28,6 +28,20 @@ generations, incarnations and revisions are nonzero uint64 values.
 | 20: interest | 36 | nonzero epoch, anchor address, int32 horizontal radius, int32 vertical radius |
 | 21: resync | 12 | nonzero transfer ID |
 
+Binding uses the same header with kinds 1 and 2:
+
+| Kind | Total bytes | Fields following header, in order |
+| --- | --- | --- |
+| 1: bind request | 74 | peer ID, generation, ticket high, ticket low, uint16 chunk edge, uint16 horizontal view radius, uint16 vertical view radius, 32 fingerprint bytes |
+| 2: bind accepted | 20 | peer ID, generation |
+
+The two view radii are the client's own configured render distance. A peer chooses them, so the
+decoder rejects anything above `ChunkInterest.MaximumRadius` rather than sizing for it. The server
+serves `min(client, server)` and additionally never exceeds the client's declared radii on any
+later interest, including one that server-side code sets explicitly: the client sizes its renderer's
+chunk slots from exactly this number and cannot hold more. See
+[terrain chunk capacity](terrain-chunk-capacity.md) for why that ceiling is load-bearing.
+
 Slices contain 1–1,004 bytes. Offsets/counts are checked without overflowing.
 A snapshot declaration permits at most `ChunkWireCodec.MaxSnapshotBytes`
 (8 × chunk volume + 128); a delta permits `MaxDeltaBytes` (12 × volume + 128).

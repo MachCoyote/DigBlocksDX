@@ -95,7 +95,7 @@ pins this.
 ## When residency outgrows the grid
 
 It should not be able to: view distance is negotiated, so a client never receives more than it
-configured (see [network session foundation](network-session-foundation.md)). If it happens anyway,
+configured (see [chunk transfer protocol](chunk-transfer-protocol.md)). If it happens anyway,
 `ChunkOcclusionGraph.SetNode` refuses the newcomer rather than overwriting a live chunk, warns once,
 and fails open — every resident chunk renders and occlusion culling stops. Degraded, loud, and not
 fatal. Nothing throws, and meshing does not stop.
@@ -105,4 +105,5 @@ fatal. Nothing throws, and meshing does not stop.
 - [Chunk meshing and terrain rendering](chunk-meshing-rendering.md)
 - [Chunk loading optimization](chunk-loading-optimization.md), which authored the current distances
 - [Dynamic chunk loading](dynamic-chunk-loading.md)
-- [Network session foundation](network-session-foundation.md) for view distance negotiation
+- [Terrain chunk slot addressing implementation summary](terrain-chunk-slot-addressing-summary.md)
+- [Independent chunk transfer protocol](chunk-transfer-protocol.md) for view distance negotiation

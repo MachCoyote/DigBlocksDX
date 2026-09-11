@@ -85,7 +85,7 @@ transport-specific implementation.
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
 | Debug menu, debug toggles, or the terrain debug views | `Scripts/Client/Debugging`, `Scripts/Core/Diagnostics`, then `docs/debug-menu-implementation.md` |
-| Chunk slot capacity, render distance, or residency limits | `docs/terrain-chunk-capacity.md`, then `Scripts/Voxels/ChunkSlotGrid.cs` and `Scripts/Networking/NetCode/Bulk/ChunkStreamingSettings.cs` |
+| Chunk slot capacity, render distance, or residency limits | `docs/terrain-chunk-capacity.md` and `docs/terrain-chunk-slot-addressing-summary.md`, then `Scripts/Voxels/ChunkSlotGrid.cs` and `Scripts/Networking/NetCode/Bulk/ChunkStreamingSettings.cs` |
 | Terrain missing from the Scene view or another viewport | `Scripts/Client/Rendering/TerrainCameraSet.cs`, then `docs/terrain-secondary-camera-summary.md` |
 | Application state, play/pause/quit intent | `Scripts/Client/Flow`, then `Scripts/Client/Input` |
 | Session lifetime or world readiness | `Scripts/Bootstrap/Session`, then `Scripts/Core/Session` |
