@@ -8,6 +8,7 @@ namespace DigBlocks.Networking
         Connecting,
         Approving,
         AwaitingWorldData,
+        InGame,
         Stopping,
         Faulted,
         Disconnected

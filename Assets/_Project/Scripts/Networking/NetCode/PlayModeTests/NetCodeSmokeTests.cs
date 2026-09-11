@@ -266,6 +266,8 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
 
             using (var approved = server.World.EntityManager.CreateEntityQuery(typeof(ConnectionApproved)))
                 Assert.That(approved.CalculateEntityCount(), Is.EqualTo(1));
+            //admission alone must never put a client in game: this session streams no world data, so
+            //there is nothing to stand in and ghost replication stays off.
             using (var inGame = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame)))
                 Assert.That(inGame.IsEmptyIgnoreFilter, Is.True);
 

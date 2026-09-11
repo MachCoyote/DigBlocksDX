@@ -89,8 +89,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             Assert.That(server.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(DefaultResidency));
             await Until(() => bulk.ClientDataReady);
             Assert.That(client.World.GetExistingSystemManaged<ChunkWorldSystem>().Store.Count, Is.EqualTo(DefaultResidency));
-            using (var query = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame))) Assert.That(query.IsEmpty, Is.True);
-            Assert.That(session.State, Is.EqualTo(NetworkSessionState.AwaitingWorldData));
+            await Until(() => session.State == NetworkSessionState.InGame);
             ushort port = bulk.ListeningPort;
             await host.StopAsync(CancellationToken.None);
             Assert.That(server.World, Is.Null); Assert.That(client.World, Is.Null);
@@ -126,8 +125,10 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             await Until(() => replica.InterestEpoch == 3 && bulk.ClientDataReady);
             Assert.That(replica.TryReadReplica(address, out var returned), Is.True);
             Assert.That(returned.Incarnation, Is.GreaterThan(incarnation)); Assert.That(returned.SolidAt(7), Is.Zero);
+            //two interest epochs have passed, and each one leaves the store briefly incomplete.
+            //Readiness latches precisely so that does not drop the client back out of the game.
             using var query = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame));
-            Assert.That(query.IsEmpty, Is.True);
+            Assert.That(query.CalculateEntityCount(), Is.EqualTo(1), "interest changes must not eject the client from the game");
         });
 
         [UnityTest]
@@ -479,6 +480,35 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             session = new NetCodeSession(NetworkSessionRole.Client, new NetworkSessionOptions("127.0.0.1", port, 1), () => runtime.World, null, logger, () => identity);
             var bulk = new ChunkCompanionService(session, registry: registry); host = Host(runtime, session, bulk); return bulk;
         }
+        //Ghost replication is off until both ends of a connection are in game, and the world data
+        //gate is what turns it on. Admission alone must not: a client with no chunks in hand has
+        //nowhere to stand, which is why admission stops at AwaitingWorldData.
+        [UnityTest]
+        public IEnumerator WorldDataReadinessPutsBothEndsOfTheConnectionInGame() => UniTask.ToCoroutine(async () =>
+        {
+            var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
+            var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
+            var session = new NetCodeSession(NetworkSessionRole.ClientAndServer,
+                new NetworkSessionOptions("127.0.0.1", 0, NetworkSessionOptions.CurrentProtocolVersion),
+                () => client.World, () => server.World, logger, () => 160);
+            var bulk = new ChunkCompanionService(session);
+            await Host(server, client, session, bulk).StartAsync(CancellationToken.None);
+
+            await Until(() => bulk.ClientDataReady);
+            await Until(() => session.State == NetworkSessionState.InGame);
+            using (var ready = client.World.EntityManager.CreateEntityQuery(typeof(WorldDataReady)))
+                Assert.That(ready.IsEmpty, Is.False, "the client should record that world data arrived");
+            using (var inGame = client.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame)))
+                Assert.That(inGame.CalculateEntityCount(), Is.EqualTo(1), "the client connection should be in game");
+            //the server end matters just as much; NetCode sends no snapshots until it agrees.
+            await Until(() =>
+            {
+                using var inGame = server.World.EntityManager.CreateEntityQuery(typeof(NetworkStreamInGame));
+                return inGame.CalculateEntityCount() == 1;
+            });
+            Assert.That(session.LastFailure, Is.EqualTo(NetworkFailure.None));
+        });
+
         private GameHost Host(params IGameService[] services) { var host = new GameHost(services, logger); hosts.Add(host); return host; }
         private static async UniTask Until(Func<bool> condition)
         {

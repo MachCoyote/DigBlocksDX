@@ -49,8 +49,9 @@ namespace DigBlocks.Networking.NetCode
 
             if (context.Accepted && EntityManager.HasComponent<NetworkId>(context.ClientConnection) && !context.Stopping)
             {
-                if (context.State != NetworkSessionState.AwaitingWorldData)
+                if (!context.Admitted)
                 {
+                    context.Admitted = true;
                     context.State = NetworkSessionState.AwaitingWorldData;
                     context.Logger.Log($"Admitted as peer {context.PeerId}; awaiting world data.");
                     var ready = commands.CreateEntity();
@@ -66,6 +67,7 @@ namespace DigBlocks.Networking.NetCode
             }
             //schema compatibility does not enforce sender roles; consume wrong-direction messages too.
             foreach (var (_, entity) in SystemAPI.Query<RefRO<ClientHelloRpc>>().WithAll<ReceiveRpcCommandRequest>().WithEntityAccess()) commands.DestroyEntity(entity);
+            foreach (var (_, entity) in SystemAPI.Query<RefRO<ReceiveRpcCommandRequest>>().WithAll<EnterGameRpc>().WithEntityAccess()) commands.DestroyEntity(entity);
             commands.Playback(EntityManager);
         }
 

@@ -70,7 +70,9 @@ namespace DigBlocks.Networking.NetCode
                 {
                     StartClient();
                     double deadline = Time.realtimeSinceStartupAsDouble + options.StartupTimeoutSeconds;
-                    while (client.State != NetworkSessionState.AwaitingWorldData)
+                    //admission completes at AwaitingWorldData, but the world-data gate can carry the
+                    //client on to InGame in the same frame, so accept either as "admitted".
+                    while (client.State is not (NetworkSessionState.AwaitingWorldData or NetworkSessionState.InGame))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (stopping) throw new OperationCanceledException("Session stopped during startup.");
@@ -242,6 +244,8 @@ namespace DigBlocks.Networking.NetCode
             world.EntityManager.DestroyEntity(contexts);
             using var ready = world.EntityManager.CreateEntityQuery(typeof(NetworkSessionReady));
             world.EntityManager.DestroyEntity(ready);
+            using var worldData = world.EntityManager.CreateEntityQuery(typeof(WorldDataReady));
+            world.EntityManager.DestroyEntity(worldData);
         }
 
         private static World RequireWorld(Func<World> getWorld, string role)

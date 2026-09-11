@@ -19,6 +19,8 @@ namespace DigBlocks.Networking.NetCode
         public Entity ClientConnection;
         public bool HelloSent;
         public bool Accepted;
+        //admission announced once. State moves on to InGame later, so it cannot serve as the guard.
+        public bool Admitted;
         public bool Stopping;
         public readonly Dictionary<Entity, ulong> ServerConnections = new();
 

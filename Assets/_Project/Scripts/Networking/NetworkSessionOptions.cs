@@ -6,6 +6,11 @@ namespace DigBlocks.Networking
 {
     public readonly struct NetworkSessionOptions
     {
+        //bump whenever application-level session semantics change, not merely when a field moves.
+        //v2 added the world-data gate that puts an admitted connection in game.
+        public const uint CurrentProtocolVersion = 2;
+
+
         public NetworkSessionOptions(
             string address,
             ushort port,

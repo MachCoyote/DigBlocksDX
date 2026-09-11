@@ -55,7 +55,7 @@ namespace DigBlocks.Networking
                 if (bulkPort == port) throw new ArgumentException("Game and bulk UDP ports must differ.");
             }
             string identity = Path.GetFullPath(Get("--identity-file", Path.Combine(persistentDirectory, "uid.dat")));
-            return new NetworkLaunchSettings(new NetworkSessionOptions(Get("--address", "127.0.0.1"), port, 1,
+            return new NetworkLaunchSettings(new NetworkSessionOptions(Get("--address", "127.0.0.1"), port, NetworkSessionOptions.CurrentProtocolVersion,
                 Get("--name", "Player"), capacity, Get("--bind", "0.0.0.0")), identity, bulkPort);
         }
     }
