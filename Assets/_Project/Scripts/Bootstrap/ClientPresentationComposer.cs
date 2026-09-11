@@ -22,7 +22,8 @@ namespace DigBlocks.Bootstrap
             IGameSessionController sessions,
             IApplicationLifetime lifetime,
             IGameLogger logger,
-            CancellationToken applicationLifetime)
+            CancellationToken applicationLifetime,
+            System.Collections.Generic.IReadOnlyList<DebugAction> debugActions = null)
         {
             UIRoot uiRoot = UIRootFactory.Create(uiRootPrefab, logger);
 
@@ -58,7 +59,8 @@ namespace DigBlocks.Bootstrap
                 debugOptions,
                 DebugToggleCatalog.Default,
                 logger,
-                applicationLifetime);
+                applicationLifetime,
+                debugActions);
             var terrainDebug = new TerrainDebugBinder(debugOptions);
 
             return new ClientPresentation(uiRoot, registry, menus, input, flow, debugMenu, debugOptions, terrainDebug);

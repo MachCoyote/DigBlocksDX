@@ -46,6 +46,15 @@ namespace DigBlocks.Client.Rendering
 
         //whether terrain draws into cameras besides this session's own. The authored setting is the default
         //until something overrides it, so a user setting can drive this without knowing the renderer exists
+        /// <summary>
+        /// Where the viewer currently is, in blocks. The debug camera is the closest thing to a
+        /// player this build has, so debug commands that need a position ask here.
+        /// </summary>
+        public float3 ViewerPosition => camera != null ? (float3)(Vector3)camera.transform.position : float3.zero;
+
+        /// <summary>Where the viewer is looking, for placing something in front of them.</summary>
+        public float3 ViewerForward => camera != null ? (float3)(Vector3)camera.transform.forward : new float3(0f, 0f, 1f);
+
         public bool SecondaryCameraRendering
         {
             get => secondaryCameraRendering ?? settings.SecondaryCameraRendering;

@@ -15,6 +15,9 @@ using DigBlocks.Client.Rendering;
 using DigBlocks.Client.Runtime;
 using System.Collections.Generic;
 using DigBlocks.Voxels.Generation;
+using DigBlocks.Client.Debugging;
+using DigBlocks.Simulation;
+using Unity.Mathematics;
 
 namespace DigBlocks.Bootstrap
 {
@@ -208,7 +211,8 @@ namespace DigBlocks.Bootstrap
                     sessions,
                     new UnityApplicationLifetime(),
                     logger,
-                    lifetimeCancellation.Token);
+                    lifetimeCancellation.Token,
+                    DebugCommands());
 
                 await presentation.Flow.StartAsync(lifetimeCancellation.Token);
 
@@ -224,6 +228,35 @@ namespace DigBlocks.Bootstrap
                 logger.Log("Startup failed.", GameLogLevel.Error, exception);
             }
         }
+
+        //debug commands the composition root can wire because it alone sees every layer. Client
+        //presentation holds no session or transport knowledge, so it only invokes the callback.
+        private IReadOnlyList<DebugAction> DebugCommands() => new[]
+        {
+            new DebugAction("SpawnDebugMob", "Spawn Debug Mob", UnityEngine.InputSystem.Key.F2, SpawnDebugMob)
+        };
+
+        private void SpawnDebugMob()
+        {
+            var client = sessions?.FindService<ClientRuntime>();
+            if (client?.World is not { IsCreated: true })
+            {
+                logger.Log("No client world to spawn into; start a session first.", GameLogLevel.Warning);
+                return;
+            }
+
+            //put it in front of the viewer and a little above, so it is visible rather than inside them.
+            var terrain = Terrain;
+            float3 origin = terrain?.ViewerPosition ?? float3.zero;
+            float3 forward = terrain?.ViewerForward ?? new float3(0f, 0f, 1f);
+            float3 centre = origin + math.normalizesafe(new float3(forward.x, 0f, forward.z), new float3(0f, 0f, 1f)) * 12f + new float3(0f, 3f, 0f);
+
+            if (!DebugSpawnRequest.Send(client.World, DebugMobTypeKey, SectorGrid.FromBlocks((double3)centre),
+                    radius: 6f, angularSpeed: 1.2f))
+                logger.Log("The debug spawn was not sent; the client is not in game yet.", GameLogLevel.Warning);
+        }
+
+        private const string DebugMobTypeKey = "digblocks:debug_orbiter";
 
         private IReadOnlyList<IGameService> ComposeSession(LaunchOptions launch, NetworkLaunchSettings network)
         {
@@ -256,10 +289,15 @@ namespace DigBlocks.Bootstrap
                 companion.DirectChunkDelivery = () =>
                     presentation?.DebugOptions?.IsEnabled(DebugToggleIds.DirectChunkDelivery) ?? false;
             if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
                 services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
                     () => presentation?.GameplayInputAvailable ?? false,
                     streamingOptions.HorizontalRadius, streamingOptions.VerticalRadius, presentation?.DebugOptions,
                     companion == null ? null : companion.RequestClientInterest, companion?.WorldId ?? 1));
+                //entity presentation is client-only for the same reason terrain rendering is, and it
+                //is composed separately so a headless client simply never draws entities.
+                services.Add(new EntityRenderService(() => client.World, EntityContentProvider.Load()));
+            }
             return services;
         }
 

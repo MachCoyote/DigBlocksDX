@@ -18,6 +18,7 @@ namespace DigBlocks.Client.Debugging
         private readonly IMenuCoordinator menus;
         private readonly DebugOptions options;
         private readonly IReadOnlyList<DebugToggle> toggles;
+        private readonly IReadOnlyList<DebugAction> actions;
         private readonly IGameLogger logger;
         private readonly AsyncGate gate = new AsyncGate();
         private readonly CancellationTokenSource cancellation;
@@ -33,11 +34,13 @@ namespace DigBlocks.Client.Debugging
             DebugOptions options,
             IReadOnlyList<DebugToggle> toggles,
             IGameLogger logger,
-            CancellationToken applicationLifetime)
+            CancellationToken applicationLifetime,
+            IReadOnlyList<DebugAction> actions = null)
         {
             this.menus = menus ?? throw new ArgumentNullException(nameof(menus));
             this.options = options ?? throw new ArgumentNullException(nameof(options));
             this.toggles = toggles ?? Array.Empty<DebugToggle>();
+            this.actions = actions ?? Array.Empty<DebugAction>();
             this.logger = (logger ?? throw new ArgumentNullException(nameof(logger)))
                 .CreateFor(nameof(DebugMenuController));
 
@@ -50,6 +53,18 @@ namespace DigBlocks.Client.Debugging
 
                 var action = new InputAction($"Debug/{toggle.Id}", InputActionType.Button, toggle.BindingPath);
                 action.performed += _ => Cycle(toggle);
+                toggleActions.Add(action);
+            }
+
+            //actions share the toggles' keybind lifetime: they only fire while the overlay is open,
+            //so a debug command cannot be triggered by accident during ordinary play.
+            for (int index = 0; index < this.actions.Count; index++)
+            {
+                DebugAction command = this.actions[index];
+                entries.Add(new DebugMenuEntry(command.Label, command.BindDisplay));
+
+                var action = new InputAction($"Debug/{command.Id}", InputActionType.Button, command.BindingPath);
+                action.performed += _ => Run(command);
                 toggleActions.Add(action);
             }
 
@@ -124,6 +139,14 @@ namespace DigBlocks.Client.Debugging
 
             cancellation.Cancel();
             cancellation.Dispose();
+        }
+
+        private void Run(DebugAction command)
+        {
+            if (disposed) return;
+            //a debug command reaching into a session that has gone away must not take the menu with it.
+            try { command.Invoke(); }
+            catch (Exception exception) { logger.Log($"{command.Label} failed.", GameLogLevel.Error, exception); }
         }
 
         private void Cycle(DebugToggle toggle)

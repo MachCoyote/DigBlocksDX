@@ -1,4 +1,4 @@
 {
   "name": "DigBlocks.Client.Rendering",
-  "references": ["DigBlocks.Core", "DigBlocks.Voxels", "DigBlocks.Voxels.Runtime", "DigBlocks.Voxels.Appearance", "DigBlocks.Voxels.Meshing", "Unity.Entities", "Unity.Collections", "Unity.Mathematics", "Unity.Burst", "Unity.InputSystem", "UniTask", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"]
+  "references": ["DigBlocks.Core", "DigBlocks.Voxels", "DigBlocks.Voxels.Runtime", "DigBlocks.Voxels.Appearance", "DigBlocks.Voxels.Meshing", "DigBlocks.Simulation", "DigBlocks.Simulation.Content", "Unity.Entities", "Unity.Entities.Graphics", "Unity.Transforms", "Unity.Collections", "Unity.Mathematics", "Unity.Burst", "Unity.InputSystem", "UniTask", "Unity.RenderPipelines.Core.Runtime", "Unity.RenderPipelines.Universal.Runtime"]
 }

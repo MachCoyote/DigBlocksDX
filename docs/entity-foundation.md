@@ -61,7 +61,7 @@ New assemblies:
 | --- | --- | --- |
 | `DigBlocks.Simulation` | `Scripts/Simulation` | ECS components, deterministic systems, `EntityTypeRegistry`, the unmanaged `EntityTypeAttributes` table, chunk residency, the entity chunk store contract |
 | `DigBlocks.Simulation.Content` | `Scripts/Simulation/Content` | JSON documents, archetype inheritance, the compiler |
-| `DigBlocks.Simulation.Appearance` | `Scripts/Simulation/Appearance` | compiled box models: mesh and material bindings per model key |
+| `DigBlocks.Client.Rendering/Entities` | folder, not an assembly | the presentation seam, the Entities Graphics backend and box-model meshing |
 
 Extended:
 
@@ -77,10 +77,18 @@ or anything presentational. That restriction is the same one that keeps
 `DigBlocks.Voxels.Generation` usable from EditMode tests and offline tools, and
 it is what makes simulation testable without standing up a connection.
 
-The three-layer split mirrors [block definitions](block-definitions.md) exactly,
-for the same reasons: authoring owns JSON and Newtonsoft, simulation owns the
-compiled unmanaged tables that jobs read, and appearance owns everything a
-dedicated server build must be able to drop.
+The authoring and simulation layers mirror [block definitions](block-definitions.md)
+exactly, for the same reasons: authoring owns JSON and Newtonsoft, and simulation
+owns the compiled unmanaged tables that jobs read.
+
+Appearance does not get its own assembly, which is a deliberate departure from the
+block layering. `DigBlocks.Voxels.Appearance` exists because block appearance data
+has consumers other than the renderer; entity appearance has exactly one, and
+`DigBlocks.Client.Rendering` is already the client-only assembly a dedicated
+server never loads, so the dedicated-server rule is satisfied without it. Model
+*data* still lives in `DigBlocks.Simulation/Definitions` beside the registry, as
+block appearance data lives inside `DigBlocks.Voxels`. Split it out if a second
+consumer appears.
 
 ### The cost of keeping simulation NetCode-free
 
@@ -618,9 +626,15 @@ Each step is independently verifiable, and each leaves the project working.
    mob outside a peer's interest does not reach that client, and appears when
    interest moves over it.
 8. **Presentation.** `IEntityPresentationBackend`, the Entities Graphics backend,
-   box model compilation. Verify: the mob is visible, and graphics-free batch
-   runs are unaffected.
-9. **Debug menu action.** `DebugAction` entries and the spawn keybind.
+   box model compilation. Verified with a recording backend standing in for
+   Entities Graphics, which is the same substitution the seam exists to allow, plus
+   geometry assertions on the compiled box model. Composed only for graphical
+   clients, so headless runs are unaffected.
+9. **Debug menu action.** `DebugAction` entries alongside toggles, sharing the
+   toggles' keybind lifetime so a debug command cannot fire during ordinary play.
+   The work itself is a callback supplied by the composition root, because client
+   presentation must hold no session or transport knowledge and spawning is a
+   networking concern.
 
 ## Verification
 
