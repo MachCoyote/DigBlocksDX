@@ -688,6 +688,18 @@ are now collected during iteration and spawned after it, and `DebugSpawnTests`
 drives the real path including several requests in one tick, which is the case
 that makes the ordering unavoidable rather than incidental.
 
+**A cached `RenderMeshArray` does not survive its entities.** It is backed by a
+reference-counted host `ScriptableObject` that the Entities runtime destroys the
+moment the last entity using it leaves the world. Caching one per model across a
+moment when no entity of that type exists therefore leaves a live-looking wrapper
+around a destroyed host, and the next attach dereferences it. Entities do leave
+constantly here: a mob outside a peer's simulation distance is destroyed, and one
+that returns is a new entity, so moving away and back reproduces it every time.
+Meshes and materials are now registered with `EntitiesGraphicsSystem` and
+referenced by batch id, which has no such lifetime and lasts as long as the
+backend does. The gap in coverage was that every presentation test attached to
+entities that were never destroyed.
+
 ### Dead ends worth not repeating
 
 Two findings from building the position encoding, recorded because each cost real

@@ -20,6 +20,67 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         private const string Cube = @"{ ""key"": ""digblocks:models/cube"", ""texture"": ""digblocks:entity/debug"",
             ""boxes"": [ { ""name"": ""body"", ""origin"": [-8, 0, -8], ""size"": [16, 16, 16] } ] }";
 
+        //A mob that leaves a peer's simulation distance is destroyed, and one that comes back is a
+        //new entity. If the last entity of a type goes away, the Entities runtime releases whatever
+        //backs its rendering; anything the backend cached across that moment is dead by the time the
+        //next one arrives. Moving away and back is exactly how this shows up in the game.
+        [UnityTest]
+        public IEnumerator AnEntityIsDrawnAgainAfterTheLastOneWentAway() => UniTask.ToCoroutine(async () =>
+        {
+            World world = NetCodeWorldFactory.CreateClientWorld(true);
+            try
+            {
+                var content = Content();
+                var backend = new EntitiesGraphicsPresentationBackend();
+                world.GetOrCreateSystemManaged<EntityViewSystem>().Configure(backend, content);
+                ushort pig = content.Registry.GetId("digblocks:pig");
+
+                //the world is in the player loop, so letting frames pass is what drives both the view
+                //system and the graphics system that releases rendering resources. Updating either by
+                //hand would double-update a world the loop is already driving.
+                Entity first = CreateDrawable(world, pig);
+                await Frames(4);
+                Assert.That(world.EntityManager.HasComponent<MaterialMeshInfo>(first), Is.True);
+
+                //every entity of the type goes away, which is what releases the rendering resources.
+                world.EntityManager.DestroyEntity(first);
+                await Frames(4);
+
+                //and one comes back. This must draw rather than dereference something already freed.
+                Entity second = CreateDrawable(world, pig);
+                await Frames(4);
+                Assert.That(world.EntityManager.HasComponent<MaterialMeshInfo>(second), Is.True,
+                    "an entity arriving after the last one was destroyed should still be drawable");
+                Assert.That(world.EntityManager.HasComponent<RenderBounds>(second), Is.True);
+            }
+            finally
+            {
+                if (world.IsCreated)
+                {
+                    ScriptBehaviourUpdateOrder.RemoveWorldFromCurrentPlayerLoop(world);
+                    world.Dispose();
+                }
+            }
+        });
+
+        private static async UniTask Frames(int count)
+        { for (int i = 0; i < count; i++) await UniTask.Yield(); }
+
+        private static Entity CreateDrawable(World world, ushort typeId)
+        {
+            Entity entity = world.EntityManager.CreateEntity(
+                typeof(EntityTypeId), typeof(LocalTransform), typeof(LocalToWorld));
+            world.EntityManager.SetComponentData(entity, new EntityTypeId { Value = typeId });
+            world.EntityManager.SetComponentData(entity, LocalTransform.Identity);
+            return entity;
+        }
+
+        private static CompiledEntityContent Content() =>
+            EntityContentLoader.Load(new MemoryEntityContentSource()
+                .Add(EntityContentCategory.Models, "model.json", Cube)
+                .Add(EntityContentCategory.Types, "type.json",
+                    @"{ ""key"": ""digblocks:pig"", ""model"": ""digblocks:models/cube"" }"));
+
         [UnityTest]
         public IEnumerator AGhostGetsRenderComponentsInsideANetCodeClientWorld() => UniTask.ToCoroutine(async () =>
         {
