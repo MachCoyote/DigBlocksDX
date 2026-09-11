@@ -33,6 +33,14 @@ namespace DigBlocks.Simulation
             Behaviors = new List<string>(sorted).AsReadOnly();
             Attributes = attributes;
         }
+
+        /// <summary>Whether this type runs a behaviour. Behaviour lists are short, so this is a scan.</summary>
+        public bool HasBehavior(string key)
+        {
+            for (int i = 0; i < Behaviors.Count; i++)
+                if (string.Equals(Behaviors[i], key, StringComparison.Ordinal)) return true;
+            return false;
+        }
     }
 
     /// <summary>

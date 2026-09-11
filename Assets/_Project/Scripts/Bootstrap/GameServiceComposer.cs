@@ -45,7 +45,9 @@ namespace DigBlocks.Bootstrap
                 streamingOptions: streamingOptions, authoritativeSource: authoritativeChunkSource));
             //after the companion: ghost prefabs describe entities that live in the world the chunk
             //stores own, and services stop in reverse.
-            services.Add(new EntityGhostService(session, EntityContentProvider.Load().Registry));
+            //single player's server is the player's own process, so debug spawns are theirs to make.
+            //A hosted or dedicated server needs a deliberate switch before it honours them.
+            services.Add(new EntityGhostService(session, EntityContentProvider.Load().Registry, allowDebugSpawns: local));
             return services;
         }
     }

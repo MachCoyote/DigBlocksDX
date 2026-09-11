@@ -15,12 +15,14 @@ namespace DigBlocks.Networking.NetCode
     {
         private readonly NetCodeSession session;
         private readonly EntityTypeRegistry registry;
+        private readonly bool allowDebugSpawns;
         private bool started;
 
-        public EntityGhostService(NetCodeSession session, EntityTypeRegistry registry)
+        public EntityGhostService(NetCodeSession session, EntityTypeRegistry registry, bool allowDebugSpawns = false)
         {
             this.session = session ?? throw new ArgumentNullException(nameof(session));
             this.registry = registry ?? throw new ArgumentNullException(nameof(registry));
+            this.allowDebugSpawns = allowDebugSpawns;
         }
 
         public string Name => nameof(EntityGhostService);
@@ -32,8 +34,12 @@ namespace DigBlocks.Networking.NetCode
             started = true;
             //both worlds get the same registry instance, which is what makes the prefab collections
             //agree. A peer that compiled different content fails the fingerprint comparison first.
-            Configure(session.ServerWorld);
+            World server = session.ServerWorld;
+            Configure(server);
             Configure(session.ClientWorld);
+            //only the server decides whether client-issued debug spawns are honoured.
+            if (allowDebugSpawns && server is { IsCreated: true })
+                server.EntityManager.CreateSingleton<DebugSpawnPermitted>();
             return UniTask.CompletedTask;
         }
 

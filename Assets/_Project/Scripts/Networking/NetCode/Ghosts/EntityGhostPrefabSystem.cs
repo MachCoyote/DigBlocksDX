@@ -58,6 +58,8 @@ namespace DigBlocks.Networking.NetCode
             EntityManager.AddComponent<Prefab>(prefab);
             EntityManager.AddComponentData(prefab, new EntityTypeId { Value = typeId });
             EntityManager.AddComponentData(prefab, new WorldPosition());
+            //how the position actually travels; the spawner pins its origin to where the entity appears.
+            EntityManager.AddComponentData(prefab, new ReplicatedPosition());
             //derived every frame from WorldPosition, but it has to exist for transforms and rendering.
             EntityManager.AddComponentData(prefab, LocalTransform.Identity);
             EntityManager.AddComponentData(prefab, new LocalToWorld { Value = float4x4.identity });
