@@ -18,11 +18,17 @@ namespace DigBlocks.Client.Rendering
         }
         private sealed class Completion
         {
-            private readonly bool useFence = SystemInfo.supportsGraphicsFence && SystemInfo.supportsAsyncCompute;
+            //an async readback is the portable completion token; a queue fence cannot be polled on every
+            //backend, so a fence serves only where readback is unavailable.
+            private readonly bool useFence = !SystemInfo.supportsAsyncGPUReadback &&
+                SystemInfo.supportsGraphicsFence && SystemInfo.supportsAsyncCompute;
             private readonly Action<AsyncGPUReadbackRequest> callback;
             private GraphicsFence fence;
-            private bool pending, issued, done, error;
-            public Completion() { callback = request => { error = request.hasError; done = true; }; }
+            private bool pending, issued, error;
+            //readbacks complete in the order they were issued, but a token may be re-inserted before an
+            //earlier one lands, so completion means every outstanding request finished rather than any one.
+            private int outstanding;
+            public Completion() { callback = request => { if (request.hasError) error = true; outstanding--; }; }
             public bool Ready
             {
                 get
@@ -30,14 +36,14 @@ namespace DigBlocks.Client.Rendering
                     if (!pending) return true;
                     if (!issued) return false;
                     if (error) throw new InvalidOperationException("Terrain GPU completion readback failed.");
-                    return useFence ? fence.passed : done;
+                    return useFence ? fence.passed : outstanding == 0;
                 }
             }
-            public void Pending() { pending = true; issued = false; done = false; error = false; }
+            public void Pending() { pending = true; issued = false; error = false; }
             public void Insert(CommandBuffer command, GraphicsBuffer marker)
             {
                 if (useFence) fence = command.CreateGraphicsFence(GraphicsFenceType.AsyncQueueSynchronisation, SynchronisationStageFlags.AllGPUOperations);
-                else command.RequestAsyncReadback(marker, callback);
+                else { outstanding++; command.RequestAsyncReadback(marker, callback); }
                 issued = true;
             }
         }
@@ -525,8 +531,11 @@ namespace DigBlocks.Client.Rendering
                 submissions.RemoveAt(i);
                 //the last camera holding the frame closes it; a mirrored frame outlives the camera that built it
                 if (--frame.Submissions > 0) continue;
+                //URP has already submitted this context for the camera by the time endCameraRendering runs,
+                //so a token queued into it here never executes and the frame never completes. Issuing it the
+                //way staging uploads do puts it on the render thread behind this camera's work instead.
                 command.Clear(); frame.Completion.Insert(command, marker);
-                context.ExecuteCommandBuffer(command);
+                Graphics.ExecuteCommandBuffer(command);
             }
         }
 
