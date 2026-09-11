@@ -1,0 +1,13 @@
+{
+  "name": "DigBlocks.Simulation",
+  "rootNamespace": "DigBlocks.Simulation",
+  "references": [
+    "DigBlocks.Voxels",
+    "Unity.Entities",
+    "Unity.Transforms",
+    "Unity.Collections",
+    "Unity.Mathematics",
+    "Unity.Burst"
+  ],
+  "allowUnsafeCode": false
+}

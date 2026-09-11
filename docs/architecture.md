@@ -15,6 +15,7 @@ Assets/_Project/
 │   ├── Client/               client-world coordination, application flow, input
 │   │   └── UI/               menu navigation, menu views, persistent UI root
 │   ├── Server/               authoritative server-world coordination
+│   ├── Simulation/           shared ECS components, world coordinates, entity types
 │   ├── Voxels/               chunk storage, block definitions, registry, appearance
 │   │   └── Generation/     world types, layered terrain, deterministic noise
 │   └── Bootstrap/            Unity entry point and composition root
@@ -145,9 +146,14 @@ presentation and authoring code must be removable from this build.
 - `DigBlocks.Networking.NetCode` owns Netcode for Entities and Unity Transport
   integration. Transport-specific types should not leak into Core, voxel storage,
   or save data.
-- Future shared simulation assemblies will own ECS components and deterministic
-  systems used by both client and server worlds. They may depend on
-  `Unity.Entities` without depending on `Unity.NetCode`.
+- `DigBlocks.Simulation` owns the ECS components and deterministic systems both
+  worlds share, including world coordinates and the entity type registry. It
+  depends on `Unity.Entities` and must not depend on `Unity.NetCode`, so
+  replication for its components is declared as ghost variants in
+  `DigBlocks.Networking.NetCode` rather than as `[GhostField]` on the components
+  themselves. Entity positions are authoritative as `WorldPosition`, an exact
+  integer sector plus a small offset; `LocalTransform` is derived from it and is
+  never the source of truth. See [the entity foundation](entity-foundation.md).
 
 `ClientRuntime` and `ServerRuntime` coordinate lifecycle around the native
 session. `NetCodeSession` and `NetCodeWorldFactory` create, expose and dispose

@@ -14,6 +14,7 @@
 | `DigBlocks.Networking` | Runtime | `Assets/_Project/Scripts/Networking/DigBlocks.Networking.asmdef` | DigBlocks.Core |
 | `DigBlocks.Networking.NetCode` | Runtime | `Assets/_Project/Scripts/Networking/NetCode/DigBlocks.Networking.NetCode.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
 | `DigBlocks.Server` | Runtime | `Assets/_Project/Scripts/Server/DigBlocks.Server.asmdef` | DigBlocks.Core, DigBlocks.Networking |
+| `DigBlocks.Simulation` | Runtime | `Assets/_Project/Scripts/Simulation/DigBlocks.Simulation.asmdef` | DigBlocks.Voxels |
 | `DigBlocks.Voxels` | Runtime | `Assets/_Project/Scripts/Voxels/DigBlocks.Voxels.asmdef` | - |
 | `DigBlocks.Voxels.Appearance` | Runtime | `Assets/_Project/Scripts/Voxels/Appearance/DigBlocks.Voxels.Appearance.asmdef` | DigBlocks.Voxels |
 | `DigBlocks.Voxels.Content` | Runtime | `Assets/_Project/Scripts/Voxels/Content/DigBlocks.Voxels.Content.asmdef` | DigBlocks.Voxels |
@@ -29,6 +30,7 @@
 | `DigBlocks.Core.Tests` | Test | `Assets/_Project/Tests/EditMode/Core/DigBlocks.Core.Tests.asmdef` | DigBlocks.Core |
 | `DigBlocks.NetCode.EditModeTests` | Test | `Assets/_Project/Tests/EditMode/NetCodeStreaming/DigBlocks.NetCode.EditModeTests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
 | `DigBlocks.NetCode.PlayModeTests` | Test | `Assets/_Project/Scripts/Networking/NetCode/PlayModeTests/DigBlocks.NetCode.PlayModeTests.asmdef` | DigBlocks.ChunkProtocol, DigBlocks.Client, DigBlocks.Core, DigBlocks.Networking, DigBlocks.Networking.NetCode, DigBlocks.Server, DigBlocks.Voxels, DigBlocks.Voxels.Runtime |
+| `DigBlocks.Simulation.Tests` | Test | `Assets/_Project/Tests/EditMode/Simulation/DigBlocks.Simulation.Tests.asmdef` | DigBlocks.Simulation, DigBlocks.Voxels |
 | `DigBlocks.Voxels.Appearance.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelAppearance/DigBlocks.Voxels.Appearance.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Appearance |
 | `DigBlocks.Voxels.Content.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelContent/DigBlocks.Voxels.Content.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Content |
 | `DigBlocks.Voxels.Generation.Tests` | Test | `Assets/_Project/Tests/EditMode/VoxelGeneration/DigBlocks.Voxels.Generation.Tests.asmdef` | DigBlocks.Voxels, DigBlocks.Voxels.Content, DigBlocks.Voxels.Generation |
