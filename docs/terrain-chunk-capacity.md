@@ -1,92 +1,108 @@
 # Terrain chunk capacity
 
-September 10, 2026. Recorded while fixing the standalone terrain freeze; nothing here is broken today,
-but the margin one of these numbers was chosen for has since been spent.
+September 11, 2026. Chunk slot capacity and draw distance are both derived from one authored view
+distance. This note records what that means, and why the arrangement it replaced went wrong, because
+the failure was quiet and the shape of it is easy to reintroduce.
 
-## Three different limits, only one of which binds
+## One authored number
 
-| Limit | Where | Value | Kind |
-| --- | --- | --- | --- |
-| Interest sanity ceiling | `ChunkInterest.MaximumChunks` | 32,768 | protocol guard on a decoded interest |
-| Store residency | `ChunkCompanionService.Residency()` | `chunks + chunks / 2 + 16` = 5,969 | derived from the authored interest |
-| Renderer slots | `TerrainRenderSettings.asset` `MaxChunks` | 4,096 | hand-authored tuning value |
-| Actual client residency | cylinder r=12, +/-4 | 3,969 | 441 columns x 9 layers |
+`ChunkStreamingSettings.HorizontalRenderDistanceChunks` and `VerticalRenderDistanceChunks` are the
+only authored view distance. Everything sizes itself from them:
 
-The 32,768 ceiling is deliberately not a tuning value, and its own comment says so: it bounds what a peer
-may ask for, while "the real residency bound is the store's maxResidents, which is local configuration
-rather than something a peer can choose". `TerrainRenderSettings.MaxChunks` carries the same 32,768 in its
-`[Range(16, 32768)]` attribute, so the type permits an effectively unbounded slot count; only the authored
-asset value is 4,096.
+| Derived from it | Where |
+| --- | --- |
+| Interest cylinder | `ChunkInterest.CountFor` |
+| Store residency | `ChunkCompanionService.Residency()` = `chunks + chunks / 2 + 16` |
+| Renderer slot capacity | `ChunkSlotGrid.Capacity` = `(2h+1)² × (2v+1)` |
+| Draw distance and far plane | `(h + 1) × ChunkLayout.Edge` |
 
-`TerrainRenderSettings.MaxChunks` is therefore a different kind of number from the other two. It sizes the
-renderer's GPU chunk-slot arrays, and it is the smallest of the three, so it is the one that actually binds.
+The store keeps 50% headroom because the owner store serves peers at different anchors. The renderer
+needs none: `ResidentChunkStore.SetReplicaInterest` evicts every departing chunk before any
+replacement arrives, so the client's slot occupancy never exceeds its interest count.
 
-## How the margin was spent
+`ChunkInterest.MaximumChunks` (32,768) stays what it always was — a sanity ceiling on a decoded
+interest from an untrusted peer, not a tuning value. It bounds what a peer may *ask* for. Do not
+treat it as a capacity budget.
 
-`500bf08` raised `MaxChunks` from 256 to 4,096 while the authored interest was a 2,205-chunk cylinder, which
-left 1,891 spare slots (1.86x). `fa06994`, whose subject is `docs(generation): add a worked reference world
-type and the summary`, raised `VerticalRenderDistanceChunks` from 2 to 4:
+## Slots are positions, not allocations
+
+`ChunkSlotGrid` wraps a chunk position onto a fixed box, the way a clipmap addresses a moving window:
+
+```csharp
+slot = floorMod(x, W) + W * (floorMod(z, W) + W * floorMod(y, H))
+```
+
+A slot is a pure function of position, so a chunk keeps its slot as the viewer moves, and the chunk
+entering the volume reuses the slot of the one that left. There is no free list and nothing that can
+be exhausted. Two properties are worth stating plainly because code depends on both:
+
+* **No centre is tracked.** Two positions collide only if they differ by a whole box width, and the
+  box is one chunk wider than the streamed diameter, so no two chunks that can be resident together
+  ever share a slot — wherever the volume happens to sit.
+* **Eviction must precede admission.** `SetReplicaInterest` already guaranteed this. It is now
+  load-bearing rather than merely convenient.
+
+The streamed volume is a cylinder inscribed in this box, so the corner slots stay empty: 5,625 slots
+hold 3,969 chunks at the authored distance. That ~42% is the price of not allocating, and it falls
+only on linear per-frame sweeps, not on anything that scales with chunk arrivals. A denser lattice
+(minimum distance > 2h, near-hexagonal) would cut the overhead to about 15%, at the cost of a
+generated neighbour table and arithmetic nobody can read at a glance. Not worth it unless slot count
+becomes the binding constraint.
+
+## What this replaced, and why it failed quietly
+
+`TerrainRenderSettings.MaxChunks` was hand-authored at 4,096 — a second, independent copy of the view
+distance. `500bf08` set it while residency was 2,205 chunks, leaving 1.86x headroom. `fa06994`, whose
+subject is `docs(generation): add a worked reference world type and the summary`, raised
+`VerticalRenderDistanceChunks` from 2 to 4:
 
 ```text
 vertical=2   residency=2205   headroom=1891 slots (1.86x)
 vertical=4   residency=3969   headroom=127 slots (1.03x)
 ```
 
-An 80% increase in residency rode along inside a documentation commit, and `MaxChunks` was not revisited.
+An 80% increase in residency rode along inside a documentation commit, and nothing compared the two
+numbers. `ChunkStreamingSettings.OnValidate` only warned at 32,768; `TerrainRenderer.Validate` only
+rejected a `MaxChunks` outside `1..32768`.
 
-## What is and is not at risk
+The one enforcement was a runtime throw when the free list emptied. `TerrainRenderService.Tick`
+caught it into `failure` and then returned early forever, so meshing stopped permanently while chunk
+streaming kept running — terrain frozen part-loaded while the world audibly kept loading.
 
-A moving anchor cannot transiently overflow the slots. `ResidentChunkStore.SetReplicaInterest` evicts every
-chunk outside the new interest synchronously, raising `ReplicaRemoved` for each before any replacement
-arrives, so the client replica store never holds more than the interest count. The store's own 50% headroom
-exists for the owner store serving peers at different anchors, not for the client.
+## Cost model
 
-The exposure is authoring. Nothing validates the streaming radius against the renderer's slot count:
-`ChunkStreamingSettings.OnValidate` only warns at 32,768, and `TerrainRenderer.Validate` only rejects a
-`MaxChunks` outside `1..32768`. Neither compares the two. Raising `HorizontalRenderDistanceChunks` to 13
-(4,653 chunks) or `VerticalRenderDistanceChunks` to 5 (4,851) silently exceeds 4,096 with no warning.
+Three paths used to scale with capacity rather than occupancy. The worst is gone:
 
-The only enforcement is a runtime throw in `ChunkMeshScheduler.OnChanged`:
+* `ChunkOcclusionGraph.RebuildLookup` was O(capacity) on **every** publish — O(N·capacity) to load a
+  volume, about 16M operations at the authored distance and ~3.9 billion at h=32. Slots are now
+  derived, so it does not exist.
+* The occlusion flood fill did an `int3`-keyed dictionary probe per face per visited chunk, every
+  frame. Neighbour slots are a fixed permutation, precomputed once into a `6 × capacity` table.
+* `TerrainRenderer.DrawCamera` still dispatches one thread group per slot per batch per frame, and
+  `UpdateCameraVisibility` still walks every slot per camera per frame. Both are linear and
+  Burst/job-friendly. The dispatch is the one to fix first if the view distance grows a lot: use a
+  compacted occupied-slot list with indirect dispatch, or handle several slots per group.
 
-```csharp
-if (freeSlots.Count == 0) throw new InvalidOperationException("Terrain chunk capacity is smaller than admitted residency.");
-```
+### The wrap seam
 
-`TerrainRenderService.Tick` catches that into `failure` and then returns early forever, so meshing stops
-permanently while chunk streaming keeps running. The symptom is terrain that freezes partway through while
-the world audibly keeps loading, which is close enough to the render-context completion bug fixed alongside
-this note to be mistaken for it.
+Traversal must not trust the neighbour table alone. An active neighbour slot may hold the chunk that
+wrapped onto it from the opposite face of the box rather than a true neighbour — at h=12, chunk
+x=24 occupies the slot x=−1 would. Stepping across that seam lights up the far side of the world.
+The fill therefore keeps one `int3` comparison per candidate, which is still far cheaper than the
+hash probe it replaced. `ChunkOcclusionGraphTests.TraversalDoesNotStepAcrossTheWrapSeamToADistantChunk`
+pins this.
 
-## Why MaxChunks cannot simply be set to 32,768
+## When residency outgrows the grid
 
-Memory is not the obstacle. At 32,768 slots the per-frame chunk buffers cost about 3 MB of GPU memory across
-three frame snapshots, and the CPU-side arrays about 2 MB. Three code paths are proportional to capacity
-rather than to occupancy, in increasing order of severity:
-
-- `TerrainRenderer.DrawCamera` dispatches the cull kernel with one thread group per slot, per batch, per
-  frame, whether or not the slot holds anything.
-- `TerrainRenderer.UpdateCameraVisibility` walks every slot once per camera per frame.
-- `ChunkOcclusionGraph.RebuildLookup` is O(capacity) and runs on **every** `SetNode` and `RemoveNode`, which
-  is once per published chunk. Loading 3,969 chunks into 4,096 slots already costs roughly 16 million
-  operations plus 3,969 dictionary rebuilds; at 32,768 slots the same load costs roughly 130 million.
-
-The last of these is the reason capacity is not currently free, and it should be made incremental before
-the slot count is treated as a sanity limit rather than a budget.
-
-## Options
-
-1. Derive `MaxChunks` from the streaming options the way `ChunkCompanionService.Residency` already does, so
-   one authored render distance drives both and the two cannot drift apart again.
-2. Make `ChunkOcclusionGraph.RebuildLookup` incremental, removing the per-publish O(capacity) cost and with
-   it the main reason to keep the slot count small.
-3. At minimum, cross-validate the authored streaming radius against `TerrainRenderSettings.MaxChunks` so the
-   mismatch is an authoring-time warning rather than a fatal runtime throw.
-
-Options 1 and 3 are alternatives; option 2 is independent and is the prerequisite for an effectively
-unbounded slot count.
+It should not be able to: view distance is negotiated, so a client never receives more than it
+configured (see [network session foundation](network-session-foundation.md)). If it happens anyway,
+`ChunkOcclusionGraph.SetNode` refuses the newcomer rather than overwriting a live chunk, warns once,
+and fails open — every resident chunk renders and occlusion culling stops. Degraded, loud, and not
+fatal. Nothing throws, and meshing does not stop.
 
 ## References
 
 - [Chunk meshing and terrain rendering](chunk-meshing-rendering.md)
 - [Chunk loading optimization](chunk-loading-optimization.md), which authored the current distances
 - [Dynamic chunk loading](dynamic-chunk-loading.md)
+- [Network session foundation](network-session-foundation.md) for view distance negotiation
