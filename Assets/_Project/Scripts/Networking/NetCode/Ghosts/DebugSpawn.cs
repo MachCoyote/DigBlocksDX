@@ -44,7 +44,7 @@ namespace DigBlocks.Networking.NetCode
 
             Entity entity = manager.Instantiate(prefab);
             manager.SetComponentData(entity, position);
-            manager.SetComponentData(entity, new ReplicatedPosition { OriginSector = position.Sector, Offset = position.Local });
+            manager.SetComponentData(entity, new ReplicatedPosition { Blocks = SectorGrid.ToBlocks(position) });
 
             var definition = prefabs.Registry[typeId];
             if (definition.HasBehavior(SimulationBehaviors.CircleFlight))

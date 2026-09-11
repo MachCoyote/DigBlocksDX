@@ -89,9 +89,92 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 $"position jumped {worstStep:0.##} blocks between frames; a sector boundary tear looks like {SectorGrid.SectorEdge}");
         });
 
-        private static bool TryReadClientPosition(World world, out WorldPosition position)
+        //The concern this whole representation exists for: a player travelling millions of blocks must
+        //not lose precision. Measuring the flown radius in absolute terms would mostly measure
+        //interpolation chord error, so this compares the same circle at the origin against one fifty
+        //million blocks out. Geometry is identical, so any extra error out there is precision loss.
+        //A float wire format resolves to four blocks at fifty million and would fail loudly.
+        [UnityTest]
+        public IEnumerator PrecisionDoesNotDecayFiftyMillionBlocksFromTheOrigin() => UniTask.ToCoroutine(async () =>
         {
-            position = default;
+            double nearError = await FlyCircleAndMeasureRadiusError(new int3(0, 96, 0), 182);
+            double farError = await FlyCircleAndMeasureRadiusError(new int3(50_000_000, 96, 50_000_000), 183);
+
+            //both are dominated by the same chord error, so they should be within a millimetre or two.
+            Assert.That(farError, Is.LessThan(nearError + 0.05),
+                $"radius error grew from {nearError:0.####} at the origin to {farError:0.####} fifty million blocks out");
+        });
+
+        private const float MeasuredRadius = 120f;
+
+        private async UniTask<double> FlyCircleAndMeasureRadiusError(int3 centreBlock, ulong identity)
+        {
+            var registry = Registry();
+            var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
+            var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
+            var session = new NetCodeSession(NetworkSessionRole.ClientAndServer,
+                new NetworkSessionOptions("127.0.0.1", 0, NetworkSessionOptions.CurrentProtocolVersion),
+                () => client.World, () => server.World, logger, () => identity);
+            var bulk = new ChunkCompanionService(session);
+            var ghosts = new EntityGhostService(session, registry, allowDebugSpawns: true);
+            var host = Host(server, client, session, bulk, ghosts);
+            await host.StartAsync(CancellationToken.None);
+            await Until(() => session.State == NetworkSessionState.InGame);
+
+            var prefabs = server.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+            await Until(() => prefabs.Built);
+
+            var centre = SectorGrid.FromBlocks(centreBlock);
+            double3 centreBlocks = SectorGrid.ToBlocks(centre);
+            Entity spawned = EntitySpawn.Spawn(server.World.EntityManager, prefabs,
+                registry.GetId(Orbiter), centre, radius: MeasuredRadius, angularSpeed: 1.5f);
+            Assert.That(spawned, Is.Not.EqualTo(Entity.Null));
+
+            double worstRadiusError = 0, worstServerError = 0, worstWireError = 0;
+            int sampled = 0;
+            double deadline = Time.realtimeSinceStartupAsDouble + 5;
+            while (Time.realtimeSinceStartupAsDouble < deadline)
+            {
+                await UniTask.Yield();
+                if (!TryReadClientPosition(client.World, out var position, out var wire)) continue;
+                //ignore the first moments, where the ghost has spawned but not yet been interpolated.
+                if (++sampled < 30) continue;
+
+                double3 offset = SectorGrid.ToBlocks(position) - centreBlocks;
+                worstRadiusError = math.max(worstRadiusError,
+                    math.abs(math.length(new double2(offset.x, offset.z)) - MeasuredRadius));
+
+                //the raw replicated doubles, before reconstruction, separate wire loss from ours.
+                double3 wireOffset = wire - centreBlocks;
+                worstWireError = math.max(worstWireError,
+                    math.abs(math.length(new double2(wireOffset.x, wireOffset.z)) - MeasuredRadius));
+
+                //the server's own position isolates simulation error from anything the wire adds.
+                server.World.EntityManager.CompleteAllTrackedJobs();
+                double3 authoritative = SectorGrid.ToBlocks(server.World.EntityManager.GetComponentData<WorldPosition>(spawned)) - centreBlocks;
+                worstServerError = math.max(worstServerError,
+                    math.abs(math.length(new double2(authoritative.x, authoritative.z)) - MeasuredRadius));
+            }
+
+            Assert.That(sampled, Is.GreaterThan(60), "the ghost should have been replicated and sampled");
+            //simulation keeps position as an exact sector plus a small offset, so its own error is
+            //independent of distance. If this ever fails, the problem is the sector grid, not the wire.
+            Assert.That(worstServerError, Is.LessThan(0.01),
+                $"the server's own circle was off by {worstServerError:0.######} blocks at {centreBlock}");
+            //the reconstruction is lossless, so anything the wire loses shows up in both.
+            Assert.That(worstRadiusError, Is.EqualTo(worstWireError).Within(0.01),
+                "reconstructing the position from the wire should not add error of its own");
+            await host.StopAsync(CancellationToken.None);
+            hosts.Remove(host);
+            return worstRadiusError;
+        }
+
+        private static bool TryReadClientPosition(World world, out WorldPosition position) =>
+            TryReadClientPosition(world, out position, out _);
+
+        private static bool TryReadClientPosition(World world, out WorldPosition position, out double3 wire)
+        {
+            position = default; wire = default;
             if (world is not { IsCreated: true }) return false;
             //the client rebuilds WorldPosition in a job, so sampling it from the main thread has to
             //wait for that job rather than racing it.
@@ -100,6 +183,7 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                 ComponentType.ReadOnly<WorldPosition>(), ComponentType.ReadOnly<ReplicatedPosition>());
             if (query.CalculateEntityCount() != 1) return false;
             position = query.GetSingleton<WorldPosition>();
+            wire = query.GetSingleton<ReplicatedPosition>().Blocks;
             return true;
         }
 

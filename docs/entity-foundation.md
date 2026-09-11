@@ -164,7 +164,7 @@ All unmanaged, in `DigBlocks.Simulation`:
 | --- | --- | --- |
 | `EntityTypeId { ushort Value }` | yes, static | index into the registry table |
 | `WorldPosition { int3 Sector; float3 Local; }` | no, rebuilt from `ReplicatedPosition` | the authoritative position; see [coordinates](#coordinates-and-precision) |
-| `ReplicatedPosition { int3 OriginSector; float3 Offset; }` | yes | how position travels; owned by the netcode assembly |
+| `ReplicatedPosition { double X, Y, Z; }` | yes | how position travels: absolute blocks, quantized to 1/1024; owned by the netcode assembly |
 | `LocalTransform` | no | derived frame-local transform for physics and rendering, never the source of truth |
 | `AabbExtents { float2 Value }` | no | width and height, derived from the registry on spawn |
 | `ChunkResidency { ChunkAddress Address }` | no | server only |
@@ -223,37 +223,50 @@ nothing outside the frame machinery writes it.
 ### Replication
 
 `WorldPosition` is not itself replicated. Position travels as `ReplicatedPosition`:
-an `int3 OriginSector` pinned when the ghost spawns, plus a quantized `float3
-Offset` from it. The client rebuilds `WorldPosition` from the pair, and
-`LocalTransform` is derived from that.
+absolute block coordinates as three `double` ghost fields, quantized to 1/1024 of
+a block. The client rebuilds `WorldPosition` from them, and `LocalTransform` is
+derived from that.
 
-The reason is interpolation. NetCode interpolates each ghost field independently,
-so replicating the sector and the offset directly would lerp the offset across its
-wrap while the sector snapped: every sector crossing would throw the entity a full
-sector's width and back inside one tick. Because the pinned origin never changes,
-there is nothing to tear against, and the replicated offset is continuous
-everywhere, boundary crossings included.
+A quantized `double` field is stored in a `long` and delta-compressed with
+`WritePackedLongDelta`, so this is sub-millimetre precision across a range of
+about nine quadrillion blocks, and the precision is identical everywhere. It does
+not decay with distance from the origin, from a spawn point, or from anything
+else. Bandwidth is not the obvious loss it looks like, because the value
+delta-compresses against the previous snapshot: what goes on the wire is the
+movement since the last tick, which for anything moving at a plausible speed is a
+handful of bits.
 
-The alternative was a custom ghost field template, which NetCode supports and
-which would interpolate the reconstructed position directly. Registering one
-requires compiling into the `Unity.NetCode` assembly through an assembly
-definition reference, and Unity does not rebuild package assemblies while the
-package is immutable in the package cache, so the registration never reaches the
-generator. Embedding the package would fix that at the cost of vendoring it.
-Pinning the origin avoids the problem outright and is simpler, so it wins on
-merit rather than only on availability.
+The sector split must not reach the wire. NetCode interpolates each ghost field
+independently, so replicating the sector and the offset as separate fields would
+lerp the offset across its wrap while the sector snapped, and every sector
+crossing would throw the entity a full sector's width and back inside one tick.
+An absolute coordinate has no wrap to tear at. Simulation still keeps the sector
+form, because physics and rendering need a frame-local float and the sector grid
+is what supplies one.
 
-What it costs: precision now decays with distance travelled from the spawn point
-rather than from the world origin. Sub-millimetre for the first several thousand
-blocks, about a centimetre at a hundred thousand. Entities are stored and reloaded
-with their chunk and a reloaded entity is a new ghost with a fresh origin, so
-error does not accumulate across a long life. There is deliberately no automatic
-re-origining, because that would reintroduce the discontinuity this avoids;
-graceful decay is better than a jump.
+### Why the quantization is a power of two
 
-`SectorBoundaryReplicationTests` flies a mob through a sector boundary and asserts
-both that it was seen on each side and that no two consecutive client frames move
-it more than an eighth of a sector.
+1024, not 1000, and it matters more than it looks. The generated deserializer
+dequantizes with the scale written as a float literal widened to a double. At a
+quantization of 1000 the reciprocal is 0.001000000047..., a relative error of
+about 4.8e-8: under a micron near the origin, but **two whole blocks fifty million
+blocks out**, which quietly undoes the entire point of replicating doubles. 1/1024
+is exact in both float and double, so the scale contributes no error at any
+distance. Any future quantization on a large-magnitude field should be a power of
+two for the same reason.
+
+### Verification
+
+`SectorBoundaryReplicationTests` covers both halves:
+
+- a mob flown through a sector boundary is asserted to be seen on each side, and
+  no two consecutive client frames may move it more than an eighth of a sector,
+  where a tear would be a whole sector;
+- the same circle is flown at the origin and fifty million blocks out, and the
+  error out there may not exceed the error at the origin. Measuring the radius in
+  absolute terms would mostly measure interpolation chord error, so comparing two
+  identical circles is what isolates precision. Both currently come out at 0.038
+  blocks, which is the chord error alone.
 
 ### Simulation frames
 
