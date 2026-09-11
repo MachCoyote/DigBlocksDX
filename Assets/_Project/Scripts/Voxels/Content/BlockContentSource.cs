@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace DigBlocks.Voxels.Content
 {
@@ -63,7 +65,33 @@ namespace DigBlocks.Voxels.Content
                 string json;
                 try { json = File.ReadAllText(file); }
                 catch (IOException error) { throw new Definitions.BlockContentException(null, "Cannot read " + file + ".", error); }
-                yield return new ContentDocument(Path.GetFileName(file), json);
+                string name = Path.GetFileName(file);
+                foreach (var document in SplitDocuments(name, json)) yield return document;
+            }
+        }
+
+        //a file's root is either one object (the common case, passed through untouched) or an array of
+        //objects, so a set of related blocks or materials can share a file without clutter. Array order
+        //is each entry's load order within the file; the file itself still sorts ordinally against others.
+        private static IEnumerable<ContentDocument> SplitDocuments(string fileName, string json)
+        {
+            JToken root;
+            try { root = JToken.Parse(json); }
+            catch (JsonException error)
+            { throw new Definitions.BlockContentException(null, "Malformed JSON in " + fileName + ": " + error.Message, error); }
+
+            if (!(root is JArray array))
+            {
+                yield return new ContentDocument(fileName, json);
+                yield break;
+            }
+
+            for (int i = 0; i < array.Count; i++)
+            {
+                if (!(array[i] is JObject entry))
+                    throw new Definitions.BlockContentException(null, fileName + "[" + i + "] must be a JSON object.");
+                string key = entry["key"]?.Type == JTokenType.String ? entry["key"].Value<string>() : i.ToString();
+                yield return new ContentDocument(fileName + "[" + key + "]", entry.ToString(Formatting.None));
             }
         }
     }

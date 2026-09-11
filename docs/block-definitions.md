@@ -65,6 +65,12 @@ Content lives under `Assets/StreamingAssets/content/digblocks/` in `materials/`,
 rather than nested, and any unknown field is a load error naming the file — a
 silently ignored typo would ship as a wrong block.
 
+A file's root is either one object, the common case, or an array of objects, so a
+set of related definitions can share a file instead of one file each. Entries load
+in array order, and the file as a whole still sorts ordinally against other files.
+A load error inside an array entry names the file and that entry's `key` (or its
+index, if the entry has none), such as `wood.json[digblocks:oak_log]`.
+
 ### Materials
 
 A render material is one Unity material and the texture array it owns. There are
@@ -158,7 +164,9 @@ EditMode tests cover archetype precedence and tag union, per-face override rules
 deterministic property expansion and state-override matching, the fingerprint
 including attributes while excluding appearance, attribute and appearance table
 alignment to state ids, and rejection of unknown archetypes, cycles, out-of-range
-slices, malformed JSON and unknown fields. `ShippedBlockContentTests` asserts the
+slices, malformed JSON and unknown fields. `DirectoryBlockContentSourceTests`
+covers the one-object-per-file and array-of-objects-per-file forms, array load
+order, and error naming for a bad entry inside an array. `ShippedBlockContentTests` asserts the
 compiled ids, attributes and slice assignments of the content above, so a content
 edit has to update those assertions deliberately.
 
