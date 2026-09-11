@@ -76,6 +76,26 @@ namespace DigBlocks.Networking.NetCode
         public int PayloadCount { get; private set; }
         private long payloadBytes;
 
+        /// <summary>
+        /// A snapshot of what one peer is currently interested in. Entity residency and ghost
+        /// relevancy both key off this, so it is exposed as a copied value rather than by handing
+        /// out the peer, whose lease and transfer state is nobody else's business.
+        /// </summary>
+        internal readonly struct PeerInterest
+        {
+            public readonly ulong PeerId;
+            public readonly ChunkInterest Interest;
+            public PeerInterest(ulong peerId, ChunkInterest interest) { PeerId = peerId; Interest = interest; }
+        }
+
+        internal void CopyInterests(List<PeerInterest> destination)
+        {
+            destination.Clear();
+            foreach (var pair in peers)
+                if (pair.Value.Interest != null && !pair.Value.Failed)
+                    destination.Add(new PeerInterest(pair.Key, pair.Value.Interest));
+        }
+
         public string DescribePeer(ulong id)
         {
             if (!peers.TryGetValue(id, out var peer)) return "streaming peer is not registered";

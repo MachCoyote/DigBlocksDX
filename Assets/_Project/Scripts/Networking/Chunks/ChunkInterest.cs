@@ -67,15 +67,30 @@ namespace DigBlocks.ChunkProtocol
                 throw new ArgumentOutOfRangeException(nameof(position), "Interest crosses the address range.");
         }
 
-        public bool Contains(ChunkAddress address)
+        public bool Contains(ChunkAddress address) => Contains(Anchor, HorizontalRadius, VerticalRadius, address);
+
+        /// <summary>
+        /// The containment test on its own, so a caller working to a smaller radius than the one this
+        /// interest was built with does not have to build a second interest to ask.
+        /// </summary>
+        public static bool Contains(ChunkAddress anchor, int horizontalRadius, int verticalRadius, ChunkAddress address)
         {
-            if (address.World != Anchor.World) return false;
-            long dy = (long)address.Position.y - Anchor.Position.y;
-            if (Math.Abs(dy) > VerticalRadius) return false;
-            long dx = (long)address.Position.x - Anchor.Position.x;
-            long dz = (long)address.Position.z - Anchor.Position.z;
-            return dx * dx + dz * dz <= (long)HorizontalRadius * HorizontalRadius;
+            if (address.World != anchor.World) return false;
+            long dy = (long)address.Position.y - anchor.Position.y;
+            if (Math.Abs(dy) > verticalRadius) return false;
+            long dx = (long)address.Position.x - anchor.Position.x;
+            long dz = (long)address.Position.z - anchor.Position.z;
+            return dx * dx + dz * dz <= (long)horizontalRadius * horizontalRadius;
         }
+
+        /// <summary>
+        /// The same volume clipped to a smaller radius, for callers that care about a shorter distance
+        /// than chunks are streamed at. Never widens: simulating an entity in a chunk the peer does
+        /// not have would be replicating something it cannot place.
+        /// </summary>
+        public ChunkInterest Narrowed(int horizontalRadius, int verticalRadius) =>
+            new ChunkInterest(Epoch, Anchor, Math.Min(horizontalRadius, HorizontalRadius),
+                Math.Min(verticalRadius, VerticalRadius));
 
         public ChunkAddress[] Addresses()
         {

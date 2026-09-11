@@ -1,5 +1,6 @@
 using System;
 using DigBlocks.ChunkProtocol;
+using DigBlocks.Simulation;
 using UnityEngine;
 
 namespace DigBlocks.Networking.NetCode
@@ -10,6 +11,15 @@ namespace DigBlocks.Networking.NetCode
         [Min(1)] public int WorldId = 1;
         [Min(0)] public int HorizontalRenderDistanceChunks = 2;
         [Min(0)] public int VerticalRenderDistanceChunks = 1;
+
+        [Header("Simulation distance")]
+        [Tooltip("How far from a player entities stay alive and replicated, in chunks. Separate from "
+            + "render distance because streaming a chunk costs bandwidth once, while keeping its "
+            + "entities alive costs ticks and snapshots every frame for every peer. Always clamped "
+            + "down to the render distance: an entity in a chunk the client does not have cannot be "
+            + "placed.")]
+        [Min(0)] public int HorizontalSimulationDistanceChunks = 2;
+        [Min(0)] public int VerticalSimulationDistanceChunks = 1;
 
         [Header("Transfer budgets")]
         [Tooltip("Bytes the server may send across all peers in one tick.")]
@@ -26,6 +36,10 @@ namespace DigBlocks.Networking.NetCode
             + "window can take; raising it lifts the peak load rate but makes each frame lumpier.")]
         [Range(1, 64)] public int AppliesPerTick = 2;
 
+        /// <summary>Entity simulation distance. Entity-scoped, so it never reaches the chunk protocol.</summary>
+        public EntitySimulationDistance CreateSimulationDistance() =>
+            new EntitySimulationDistance(HorizontalSimulationDistanceChunks, VerticalSimulationDistanceChunks);
+
         public ChunkStreamingOptions CreateOptions()
         {
             if (WorldId < 1) throw new InvalidOperationException("Chunk streaming requires a positive world ID.");
@@ -39,6 +53,8 @@ namespace DigBlocks.Networking.NetCode
             WorldId = Math.Max(1, WorldId);
             HorizontalRenderDistanceChunks = Math.Clamp(HorizontalRenderDistanceChunks, 0, ChunkInterest.MaximumRadius);
             VerticalRenderDistanceChunks = Math.Clamp(VerticalRenderDistanceChunks, 0, ChunkInterest.MaximumRadius);
+            HorizontalSimulationDistanceChunks = Math.Clamp(HorizontalSimulationDistanceChunks, 0, EntitySimulationDistance.MaxRadius);
+            VerticalSimulationDistanceChunks = Math.Clamp(VerticalSimulationDistanceChunks, 0, EntitySimulationDistance.MaxRadius);
             GlobalBytesPerTick = Math.Clamp(GlobalBytesPerTick, BulkDriver.MaxPayloadBytes, 8388608);
             PeerBytesPerTick = Math.Clamp(PeerBytesPerTick, BulkDriver.MaxPayloadBytes, GlobalBytesPerTick);
             MaxBufferedPayloads = Math.Clamp(MaxBufferedPayloads, 2, 256);

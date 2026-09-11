@@ -357,6 +357,28 @@ anchored on the debug camera and the mob is spawned beside it, so the added
 traffic is negligible — but the interaction between the two bandwidth budgets
 must be measured before player movement lands, not assumed.
 
+## Simulation distance
+
+How far the world is alive is a separate setting from how far it is drawn, with
+its own horizontal and vertical radii, for the same reason Minecraft separates
+them: streaming a chunk costs bandwidth once, whereas keeping the entities in it
+alive costs ticks, behaviour and snapshots every frame, for every peer. A player
+can reasonably want to see much further than the server should be simulating.
+
+`EntitySimulationDistance` carries the two radii and is authored beside render
+distance in `ChunkStreamingSettings`, because those are the two numbers a player
+would expect to find together. It stays entity-scoped and never reaches
+`ChunkStreamingOptions` or the chunk protocol.
+
+It is always clamped down to the peer's own streaming distance, never up.
+Simulating an entity in a chunk a client does not have would replicate something
+it cannot place. `ChunkInterest.Narrowed` performs that clamp, and the standalone
+`ChunkInterest.Contains` overload lets relevancy ask about one address at the
+narrowed radius without building a second interest every tick.
+
+Both entity residency and ghost relevancy key off the simulated volume rather
+than the streamed one.
+
 ## Ghost relevancy from chunk interest
 
 Without relevancy, every mob in the world replicates to every client. With it,
@@ -373,11 +395,18 @@ connection entity -> SessionContext.ServerConnections -> peer id
                   -> ChunkStreamingServer peer        -> ChunkInterest
 ```
 
-A server system rebuilds the set when an entity's `ChunkResidency` changes or a
-peer's interest epoch advances, testing `interest.Contains(residency.Address)`.
-`ChunkStreamingServer` is `internal` and its `Peer` is an implementation detail,
-so it grows a narrow read-only accessor exposing peer id, anchor and radii rather
-than handing out the peer.
+A server system rebuilds the set each tick, testing each entity's residency
+against every peer's simulated volume. `ChunkStreamingServer` is `internal` and
+its `Peer` is an implementation detail, so it grows a narrow accessor that copies
+out peer id and interest rather than handing over the peer itself.
+
+Entity residency splits its work by cost. Rebuilding the set of simulated chunks
+enumerates every chunk of every peer, so it runs only when some peer's interest
+epoch actually advances, which is when a player crosses a chunk boundary; taking
+entities back out of the store happens at the same moment, since that is when the
+resident set can grow. Unloading, by contrast, runs every tick, because an entity
+can leave the simulated set by moving or by being spawned outside it, neither of
+which touches any peer's interest.
 
 The naive rebuild is O(entities x peers), but the test is two multiplies and a
 comparison, it is Burst-parallel over entities, and it runs only on change. At a
@@ -393,7 +422,11 @@ per player, as [the chunk data architecture](chunk-data-architecture.md) require
 Entities follow the chunks:
 
 - `ChunkResidencySystem`, Burst and server-side, writes `ChunkResidency` from
-  `LocalTransform.Position`, change-filtered so a stationary mob costs nothing.
+  `WorldPosition`, skipping the write when the chunk has not changed so a
+  stationary mob costs nothing downstream.
+- Spawning sets `ChunkResidency` itself rather than waiting for that system. An
+  entity with a default residency reads as being in world zero, which no interest
+  covers, and would be swept into the chunk store before it ever ticked.
 - When a chunk leaves the resident set, the entities in it are handed to
   `IEntityChunkStore.Store(address, entities)` and destroyed.
 - When a chunk enters the resident set, `IEntityChunkStore.Load(address)`
@@ -617,6 +650,33 @@ Each step is independently verifiable, and each leaves the project working.
 - NetCode's own `PhysicsVelocityVariant` in `Unity.NetCode.Physics` is the
   precedent for declaring replication for a component whose assembly knows
   nothing about netcode.
+
+### Dead ends worth not repeating
+
+Two findings from building the position encoding, recorded because each cost real
+time and neither is discoverable from the documentation.
+
+**A quantized ghost field is only as exact as its scale.** The generated
+deserializer multiplies by the dequantization scale written as a float literal
+widened to a double. Any quantization whose reciprocal is not exactly
+representable in float therefore injects a relative error of up to about 6e-8,
+which is invisible near the origin and metres away at the edge of a large world.
+Use powers of two for quantization on any field whose magnitude can get large.
+
+**A custom ghost field template cannot be registered from a project assembly while
+the package is immutable.** The generator finds registrations one of two ways: it
+parses the `UserDefinedTemplates.RegisterTemplates` body when the compilation
+declares that type in source, which is only true for `Unity.NetCode` itself, and
+otherwise it reflects over the compiled `Unity.NetCode.dll`. The documented
+approach is an assembly definition reference that compiles the registration into
+that assembly, but Unity does not rebuild package assemblies while the package
+lives in the immutable package cache: the reference is accepted into the generated
+IDE project and the built assembly never changes. Declaring the type in a project
+assembly instead does not help either. Registering a template therefore requires
+vendoring the package. A second, unrelated trap if anyone tries again: the
+registration body is parsed syntactically for object creations among the argument's
+*descendant* nodes, so `templates.Add(new TypeRegistryEntry{...})` is invisible to
+it and `templates.AddRange(new[]{ ... })` is required.
 - Minecraft keeps entity positions and bounding boxes in `double` and renders
   chunk geometry camera-relative, so absolute coordinates never reach a float in
   the vertex path, with a world border near 30,000,000 blocks stopping play

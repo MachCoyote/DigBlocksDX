@@ -32,6 +32,12 @@ namespace DigBlocks.Networking.NetCode
         public const float DefaultCircleRadius = 8f;
         public const float DefaultCircleAngularSpeed = 1f;
 
+        private static uint WorldIdOf(EntityManager manager)
+        {
+            using var query = manager.CreateEntityQuery(ComponentType.ReadOnly<SimulationWorldId>());
+            return query.IsEmptyIgnoreFilter ? 1u : query.GetSingleton<SimulationWorldId>().Value;
+        }
+
         /// <summary>
         /// Instantiates a type's ghost prefab at a position. Pins the replication origin to where the
         /// entity appears, which is what keeps the replicated offset small and continuous.
@@ -45,6 +51,10 @@ namespace DigBlocks.Networking.NetCode
             Entity entity = manager.Instantiate(prefab);
             manager.SetComponentData(entity, position);
             manager.SetComponentData(entity, new ReplicatedPosition { Blocks = SectorGrid.ToBlocks(position) });
+            //residency is set here rather than waiting for ChunkResidencySystem, because an entity
+            //with a default residency reads as being in world zero, which no interest covers, and
+            //would be swept straight back into the chunk store before it ever ticked.
+            manager.SetComponentData(entity, new ChunkResidency { Address = SectorGrid.ChunkOf(WorldIdOf(manager), position) });
 
             var definition = prefabs.Registry[typeId];
             if (definition.HasBehavior(SimulationBehaviors.CircleFlight))

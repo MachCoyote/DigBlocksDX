@@ -77,6 +77,13 @@ namespace DigBlocks.Networking.NetCode
         public int BoundPeerCount => bound.Count;
         public int PendingBindingCount => pending.Count;
         public bool DataReady => !disposed && store.DataReady;
+        //what each peer currently wants, for the systems that must agree with chunk streaming.
+        internal void CopyInterests(System.Collections.Generic.List<ChunkStreamingServer.PeerInterest> destination)
+        {
+            destination.Clear();
+            streamingServer?.CopyInterests(destination);
+        }
+
         public long SentChunkBytes => streamingServer?.SentBytes ?? 0;
         public long AppliedChunkAcknowledgements => streamingServer?.AppliedAcknowledgements ?? 0;
         public long SentChunkSnapshots => streamingServer?.SentSnapshots ?? 0;

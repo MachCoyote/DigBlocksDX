@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using DigBlocks.ChunkProtocol;
@@ -77,6 +78,17 @@ namespace DigBlocks.Networking.NetCode
         public double MaxAppliedAckSeconds => serverEndpoint?.MaxAppliedAckSeconds ?? 0;
         public int PeakEncodedPayloadBytes => serverEndpoint?.PeakEncodedPayloadBytes ?? 0;
         public int PendingChunkPayloads => serverEndpoint?.PendingChunkPayloads ?? 0;
+        /// <summary>
+        /// What each bound peer is currently interested in. Server-side entity residency and ghost
+        /// relevancy both derive from this, so they agree with chunk streaming by construction
+        /// rather than by keeping a second opinion about who can see what.
+        /// </summary>
+        internal void CopyPeerInterests(List<ChunkStreamingServer.PeerInterest> destination)
+        {
+            destination.Clear();
+            serverEndpoint?.CopyInterests(destination);
+        }
+
         public bool SetServerInterest(ulong peerId, ChunkAddress anchor, int horizontalRadius, int verticalRadius) =>
             serverEndpoint?.SetInterest(peerId, anchor, horizontalRadius, verticalRadius) ?? false;
         public bool RequestClientInterest(ChunkAddress anchor) => clientEndpoint?.RequestInterest(anchor) ?? false;

@@ -41,13 +41,15 @@ namespace DigBlocks.Bootstrap
             services.Add(session);
             var streamingSettings = Resources.Load<ChunkStreamingSettings>("ChunkStreamingSettings");
             var streamingOptions = streamingSettings != null ? streamingSettings.CreateOptions() : new ChunkStreamingOptions();
-            services.Add(new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry,
-                streamingOptions: streamingOptions, authoritativeSource: authoritativeChunkSource));
-            //after the companion: ghost prefabs describe entities that live in the world the chunk
-            //stores own, and services stop in reverse.
-            //single player's server is the player's own process, so debug spawns are theirs to make.
-            //A hosted or dedicated server needs a deliberate switch before it honours them.
-            services.Add(new EntityGhostService(session, EntityContentProvider.Load().Registry, allowDebugSpawns: local));
+            var companion = new ChunkCompanionService(session, network.BulkPort, BlockContentProvider.Load().Registry,
+                streamingOptions: streamingOptions, authoritativeSource: authoritativeChunkSource);
+            services.Add(companion);
+            //after the companion: entity residency is derived from the chunk interest it owns, and
+            //services stop in reverse. Single player's server is the player's own process, so debug
+            //spawns are theirs to make; a hosted or dedicated server needs a deliberate switch.
+            services.Add(new EntityGhostService(session, EntityContentProvider.Load().Registry, companion,
+                allowDebugSpawns: local, worldId: streamingOptions.WorldId,
+                simulationDistance: streamingSettings != null ? streamingSettings.CreateSimulationDistance() : null));
             return services;
         }
     }
