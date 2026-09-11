@@ -7,6 +7,9 @@ namespace DigBlocks.Networking.NetCode
     public static class NetCodeWorldFactory
     {
         private const int DefaultSimulationTickRate = 30;
+        //NetCode defaults this to 1, which leaves no room to catch up with discrete ticks: a
+        //single frame past two tick intervals batches instead, and batching warns every time.
+        private const int DefaultMaxSimulationStepsPerFrame = 4;
 
         public static World CreateClientWorld()
         {
@@ -39,7 +42,8 @@ namespace DigBlocks.Networking.NetCode
             var tickRate = new ClientServerTickRate
             {
                 SimulationTickRate = DefaultSimulationTickRate,
-                NetworkTickRate = DefaultSimulationTickRate
+                NetworkTickRate = DefaultSimulationTickRate,
+                MaxSimulationStepsPerFrame = DefaultMaxSimulationStepsPerFrame
             };
 
             tickRate.ResolveDefaults();

@@ -140,6 +140,26 @@ session switching is owned by the [UI and menu foundation](ui-menu-foundation.md
 The existing 30 Hz simulation/network rates remain a starting value; forced
 busy-waiting has been removed. Tune tick rates against real gameplay profiling.
 
+`NetCodeWorldFactory` also sets `MaxSimulationStepsPerFrame` to 4. NetCode defaults it
+to 1, which is the server's entire budget for catching up with discrete ticks, while
+`MaxSimulationStepBatchSize` defaults to 4. With a budget of 1 the server never catches
+up tick by tick: the moment a frame leaves two ticks in the accumulator it batches them
+into one longer tick, which is the lossy path. At 30 Hz that threshold is a frame past
+~67 ms, so any dip below 30 fps batches periodically -- and `WarnAboutBatchedTicksSystem`
+warns on a single batched frame, because its rolling average goes from 1.0 to exactly
+1.25 against a 1.2 threshold. A budget of 4 moves batching to roughly 7.5 fps. That
+restores the warning as a signal worth acting on rather than editor frame-rate noise.
+
+The PlayMode suite still trips it, and that is expected rather than a regression: world
+creation, Burst compilation and scene loads all produce frames well past 167 ms. Those
+are harness costs, not server costs. Silence it in the fixtures with
+`netDebug.WarnBatchedTicks = false` if a clean console matters more than the signal.
+
+Read that warning as a whole-frame measurement, not a server one. Single-player runs
+both worlds on one player loop, so client meshing, upload or GC cost shows up as server
+tick batching. A reported average of 1.25 is the floor the message can print; sustained
+1.5 or 1.75 is the shape of genuine server slowness.
+
 ## Where to extend next
 
 - `Scripts/Networking`: validated options, launch parsing, identity storage,
