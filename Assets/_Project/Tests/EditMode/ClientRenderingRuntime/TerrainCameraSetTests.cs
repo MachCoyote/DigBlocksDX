@@ -60,8 +60,10 @@ namespace DigBlocks.Client.Rendering.Tests
             Assert.That(TerrainCameraSet.IsEligible(Make("plain"), primary), Is.True);
         }
 
+#if UNITY_EDITOR
         //a scene view camera is not enabled and never appears in Camera.allCameras, so it has to be found
-        //through the editor window list or terrain stays invisible in the viewport people actually inspect
+        //through the editor window list or terrain stays invisible in the viewport people actually inspect.
+        //Scene views exist only in the editor, so this one case cannot run in a player.
         [Test]
         public void OpenSceneViewsAreCollectedDespiteNotBeingEnabledCameras()
         {
@@ -78,6 +80,7 @@ namespace DigBlocks.Client.Rendering.Tests
                 Assert.That(collected, Contains.Item(view.camera));
             }
         }
+#endif
 
         [Test]
         public void SecondaryCullingModeClampsToTheStatesTheMenuOffers()

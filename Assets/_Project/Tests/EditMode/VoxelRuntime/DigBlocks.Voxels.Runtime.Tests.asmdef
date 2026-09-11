@@ -1,1 +1,1 @@
-{"name":"DigBlocks.Voxels.Runtime.Tests","references":["DigBlocks.Voxels.Runtime","DigBlocks.Voxels","DigBlocks.ChunkProtocol","Unity.Entities","Unity.Collections","Unity.Mathematics"],"includePlatforms":["Editor"],"optionalUnityReferences":["TestAssemblies"]}
+{"name":"DigBlocks.Voxels.Runtime.Tests","references":["DigBlocks.Voxels.Runtime","DigBlocks.Voxels","DigBlocks.ChunkProtocol","Unity.Entities","Unity.Collections","Unity.Mathematics"],"includePlatforms": [],"optionalUnityReferences":["TestAssemblies"]}

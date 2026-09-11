@@ -14,7 +14,7 @@
     "Unity.NetCode",
     "Unity.Networking.Transport"
   ],
-  "includePlatforms": ["Editor"],
+  "includePlatforms": [],
   "autoReferenced": false,
   "optionalUnityReferences": ["TestAssemblies"]
 }

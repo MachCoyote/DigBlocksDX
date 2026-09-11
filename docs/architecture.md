@@ -19,7 +19,7 @@ Assets/_Project/
 │   │   └── Generation/     world types, layered terrain, deterministic noise
 │   └── Bootstrap/            Unity entry point and composition root
 └── Tests/
-    ├── EditMode/             fast Core and Bootstrap contract tests
+    ├── EditMode/             contract tests; all but the editor-tooling assembly now run in Play Mode too
     └── PlayMode/             scene/bootstrap and multi-world integration tests
 
 Assets/StreamingAssets/       authored game content loaded at runtime, block definitions included
@@ -91,7 +91,7 @@ transport-specific implementation.
 | Session lifetime or world readiness | `Scripts/Bootstrap/Session`, then `Scripts/Core/Session` |
 | Architecture or dependency question | this document, then the generated assembly map and relevant `.asmdef` |
 | Package/API version question | `Packages/manifest.json`, `packages-lock.json`, and `docs/deprecations.md` |
-| Test placement | the matching assembly under `Tests/EditMode`, `Tests/PlayMode`, or NetCode `PlayModeTests` |
+| Test placement | the matching assembly under `Tests/EditMode`, `Tests/PlayMode`, or NetCode `PlayModeTests`. A test assembly whose `includePlatforms` is `["Editor"]` runs in Edit Mode only and can never run in a player; an unrestricted one runs in Play Mode and in standalone player test runs. Restrict to `Editor` only when the tests need editor APIs. |
 
 ## Technology Direction
 

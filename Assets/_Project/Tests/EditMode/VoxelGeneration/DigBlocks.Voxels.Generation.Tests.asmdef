@@ -1,7 +1,7 @@
 {
   "name": "DigBlocks.Voxels.Generation.Tests",
   "references": ["DigBlocks.Voxels", "DigBlocks.Voxels.Generation", "DigBlocks.Voxels.Content", "Unity.Collections", "Unity.Mathematics", "Unity.Burst"],
-  "includePlatforms": ["Editor"],
+  "includePlatforms": [],
   "allowUnsafeCode": true,
   "optionalUnityReferences": ["TestAssemblies"]
 }

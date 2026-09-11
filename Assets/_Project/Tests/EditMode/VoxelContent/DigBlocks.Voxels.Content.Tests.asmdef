@@ -5,9 +5,7 @@
     "DigBlocks.Voxels.Content",
     "Unity.Collections"
   ],
-  "includePlatforms": [
-    "Editor"
-  ],
+  "includePlatforms": [],
   "optionalUnityReferences": [
     "TestAssemblies"
   ]

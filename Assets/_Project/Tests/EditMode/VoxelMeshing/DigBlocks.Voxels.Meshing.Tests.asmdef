@@ -1,6 +1,6 @@
 {
   "name": "DigBlocks.Voxels.Meshing.Tests",
   "references": ["DigBlocks.Voxels", "DigBlocks.Voxels.Appearance", "DigBlocks.Voxels.Meshing", "Unity.Collections", "Unity.Mathematics", "Unity.Burst"],
-  "includePlatforms": ["Editor"],
+  "includePlatforms": [],
   "optionalUnityReferences": ["TestAssemblies"]
 }

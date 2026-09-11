@@ -9,9 +9,7 @@
     "Unity.InputSystem",
     "UnityEngine.UI"
   ],
-  "includePlatforms": [
-    "Editor"
-  ],
+  "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
   "overrideReferences": false,
