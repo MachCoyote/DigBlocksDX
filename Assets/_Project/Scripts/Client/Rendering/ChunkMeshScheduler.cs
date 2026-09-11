@@ -51,12 +51,12 @@ namespace DigBlocks.Client.Rendering
         //so the job always gets a real view rather than an uncreated one to guard against.
         private PaletteChannel air = new PaletteChannel(0);
         private readonly Dictionary<ChunkAddress, Entry> entries = new();
-        private readonly Stack<uint> freeSlots = new();
         private readonly List<ResidentChunk> initial = new();
         private readonly BlockAttributeTable attributes;
         private readonly BlockAppearanceTable appearance;
         private readonly TerrainRenderer renderer;
         private readonly TerrainRenderSettings settings;
+        private readonly ChunkSlotGrid grid;
         private ResidentChunkStore store;
         //chunks waiting to be meshed, bucketed by how many chunks away from the camera they are, so
         //picking the next one is a walk of a few buckets rather than of every resident chunk. A linear
@@ -71,15 +71,14 @@ namespace DigBlocks.Client.Rendering
         public int StaleResults { get; private set; }
         public bool IsCurrent => queuedCount == 0 && pendingCount == 0;
 
-        public ChunkMeshScheduler(CompiledBlockContent content, TerrainRenderSettings settings, TerrainRenderer renderer)
+        public ChunkMeshScheduler(CompiledBlockContent content, TerrainRenderSettings settings, TerrainRenderer renderer, ChunkSlotGrid grid)
         {
-            this.settings = settings; this.renderer = renderer;
+            this.settings = settings; this.renderer = renderer; this.grid = grid;
             attributes = content.Registry.CreateAttributeTable(Allocator.Persistent);
             appearance = BlockAppearanceTable.Create(content, Allocator.Persistent);
             workers = new Worker[settings.MeshWorkers];
             for (int i = 0; i < workers.Length; i++) workers[i] = new Worker();
             for (int i = 0; i < ready.Length; i++) ready[i] = new List<Entry>();
-            ResetSlots();
         }
 
         public void Tick(ResidentChunkStore current, float3 cameraPosition)
@@ -249,8 +248,9 @@ namespace DigBlocks.Client.Rendering
             renderer.SetGraphReady(false);
             if (!entries.TryGetValue(address, out var entry))
             {
-                if (freeSlots.Count == 0) throw new InvalidOperationException("Terrain chunk capacity is smaller than admitted residency.");
-                entry = new Entry { Address = address, Slot = freeSlots.Pop() };
+                //no allocation and nothing that can run out: a chunk's slot is a function of where it
+                //is, and the chunk that left the volume already gave this one up.
+                entry = new Entry { Address = address, Slot = (uint)grid.SlotOf(address.Position) };
                 entries.Add(address, entry);
             }
             Dirty(entry);
@@ -268,7 +268,7 @@ namespace DigBlocks.Client.Rendering
         }
         private void OnReset()
         {
-            entries.Clear(); ResetSlots(); BuiltCount = 0; renderer.SetGraphReady(false); renderer.ClearMeshes();
+            entries.Clear(); BuiltCount = 0; renderer.SetGraphReady(false); renderer.ClearMeshes();
             foreach (var list in ready) list.Clear();
             queuedCount = 0; anchored = false;
             //workers still running belong to the store that just went away. Their results are rejected
@@ -282,14 +282,12 @@ namespace DigBlocks.Client.Rendering
             if (!entries.Remove(address, out var removed)) return;
             Remove(removed);
             renderer.SetGraphReady(false);
-            renderer.Remove(removed.Slot);
-            freeSlots.Push(removed.Slot);
+            renderer.Remove(address.Position);
             if (removed.Built != 0) BuiltCount--;
             //the departed chunk's planes are gone with it, so every neighbour re-pads that side as air.
             for (int i = 1; i < 7; i++)
                 if (entries.TryGetValue(Neighbor(address, i), out var dirty)) Dirty(dirty);
         }
-        private void ResetSlots() { freeSlots.Clear(); for (int i = settings.MaxChunks - 1; i >= 0; i--) freeSlots.Push((uint)i); }
         private static ChunkAddress Neighbor(ChunkAddress address, int index)
         {
             if (index == 0) return address;

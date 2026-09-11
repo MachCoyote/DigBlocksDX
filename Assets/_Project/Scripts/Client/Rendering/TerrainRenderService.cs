@@ -21,6 +21,10 @@ namespace DigBlocks.Client.Rendering
         private readonly Func<bool> inputAvailable;
         private readonly CompiledBlockContent content;
         private readonly TerrainRenderSettings settings;
+        private readonly ChunkSlotGrid grid;
+        //the outermost streamed chunk's far face, so the camera reaches every chunk that can exist.
+        private float RenderDistance => (grid.HorizontalRadius + 1) * ChunkLayout.Edge;
+        //the outermost streamed chunk's far face, so the camera reaches every chunk that can exist.
         private readonly IDebugOptions debugOptions;
         private readonly ChunkInterestReporter interestReporter;
         private GameObject root;
@@ -53,8 +57,10 @@ namespace DigBlocks.Client.Rendering
         }
 
         public TerrainRenderService(Func<World> getWorld, CompiledBlockContent content, TerrainRenderSettings settings, Func<bool> inputAvailable,
+            int horizontalRenderDistanceChunks, int verticalRenderDistanceChunks,
             IDebugOptions debugOptions = null, Func<ChunkAddress, bool> requestChunkInterest = null, uint worldId = 1)
         {
+            grid = new ChunkSlotGrid(horizontalRenderDistanceChunks, verticalRenderDistanceChunks);
             this.getWorld = getWorld; this.content = content; this.settings = settings; this.inputAvailable = inputAvailable;
             this.debugOptions = debugOptions;
             if (requestChunkInterest != null) interestReporter = new ChunkInterestReporter(worldId, requestChunkInterest);
@@ -67,9 +73,9 @@ namespace DigBlocks.Client.Rendering
             {
                 var world = getWorld();
                 if (world == null || !world.IsCreated) throw new InvalidOperationException("Terrain requires the client world.");
-                renderer = new TerrainRenderer(content, settings);
+                renderer = new TerrainRenderer(content, settings, grid);
                 if (secondaryCameraRendering.HasValue) renderer.SecondaryCameraRendering = secondaryCameraRendering.Value;
-                scheduler = new ChunkMeshScheduler(content, settings, renderer);
+                scheduler = new ChunkMeshScheduler(content, settings, renderer, grid);
                 root = new GameObject("Terrain presentation");
                 UnityEngine.Object.DontDestroyOnLoad(root);
                 previousCamera = Camera.main;
@@ -77,7 +83,9 @@ namespace DigBlocks.Client.Rendering
                 if (previousCamera != null) previousCamera.enabled = false;
                 camera = root.AddComponent<Camera>();
                 camera.tag = "MainCamera";
-                camera.nearClipPlane = 0.1f; camera.farClipPlane = settings.RenderDistance + 64;
+                //far enough to reach the furthest streamed chunk and no further: drawing past the
+                //streamed radius only ever shows the hole where terrain has not been sent.
+                camera.nearClipPlane = 0.1f; camera.farClipPlane = RenderDistance + ChunkLayout.Edge * 2;
                 camera.backgroundColor = new Color(0.45f, 0.67f, 0.9f);
                 camera.GetUniversalAdditionalCameraData().renderPostProcessing = false;
                 //the development free camera starts above the generated world rather than at a fixed

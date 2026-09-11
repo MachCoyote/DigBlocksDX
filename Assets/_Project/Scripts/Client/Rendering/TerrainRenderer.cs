@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DigBlocks.Voxels;
 using DigBlocks.Voxels.Definitions;
 using DigBlocks.Voxels.Meshing;
 using Unity.Collections;
@@ -114,6 +115,7 @@ namespace DigBlocks.Client.Rendering
         }
 
         private readonly TerrainRenderSettings settings;
+        private readonly ChunkSlotGrid grid;
         private readonly ChunkOcclusionGraph occlusionGraph;
         private readonly MeshRangeAllocator allocator;
         private readonly GraphicsBuffer geometry, tints, marker;
@@ -154,16 +156,17 @@ namespace DigBlocks.Client.Rendering
         public int GraphCulledChunks { get; private set; }
         public int CameraVisibleQuads { get; private set; }
 
-        public TerrainRenderer(CompiledBlockContent content, TerrainRenderSettings settings)
+        public TerrainRenderer(CompiledBlockContent content, TerrainRenderSettings settings, ChunkSlotGrid grid)
         {
             this.settings = settings;
+            this.grid = grid;
             try
             {
                 Validate(content, settings);
-                occlusionGraph = new ChunkOcclusionGraph(settings.MaxChunks);
+                occlusionGraph = new ChunkOcclusionGraph(grid);
                 allocator = new MeshRangeAllocator(settings.QuadCapacity);
-                meshes = new MeshRangeAllocator.Allocation[settings.MaxChunks];
-                chunks = new NativeArray<ChunkGpuData>(settings.MaxChunks, Allocator.Persistent);
+                meshes = new MeshRangeAllocator.Allocation[grid.Capacity];
+                chunks = new NativeArray<ChunkGpuData>(grid.Capacity, Allocator.Persistent);
                 geometry = new GraphicsBuffer(GraphicsBuffer.Target.Structured, settings.QuadCapacity, PackedQuad.Stride);
                 marker = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
                 marker.SetData(new uint[] { 0 });
@@ -186,7 +189,7 @@ namespace DigBlocks.Client.Rendering
                 tints = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 256, 16);
                 tints.SetData(colors);
                 primary = new CameraSlot { Frames = new Frame[settings.FrameSlots] };
-                for (int i = 0; i < primary.Frames.Length; i++) primary.Frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
+                for (int i = 0; i < primary.Frames.Length; i++) primary.Frames[i] = new Frame(grid.Capacity, settings.QuadCapacity, materials.Length);
                 SecondaryCameraRendering = settings.SecondaryCameraRendering;
                 stagingQuads = settings.UploadBytesPerFrame / PackedQuad.Stride;
                 stagings = new Staging[settings.UploadSlots];
@@ -205,10 +208,12 @@ namespace DigBlocks.Client.Rendering
                 !(SystemInfo.supportsGraphicsFence && SystemInfo.supportsAsyncCompute) && !SystemInfo.supportsAsyncGPUReadback)
                 throw new NotSupportedException("Terrain requires compute, indirect instancing, texture arrays and GPU completion tokens.");
             if (content.Materials.Count < 1 || content.Materials.Count > 8) throw new NotSupportedException("Terrain supports up to eight material batches within the initial buffer budget.");
-            if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 || settings.MaxChunks < 1 || settings.MaxChunks > 32768 ||
+            //capacity is no longer among these: it is derived from the view distance rather than
+            //authored, and ChunkSlotGrid rejects a distance it cannot address.
+            if (settings.MeshWorkers < 1 || settings.MeshWorkers > 8 ||
                 settings.QuadCapacity < 2 * GreedyMesherJob.MaximumQuads || settings.QuadCapacity > 16 * 1024 * 1024 ||
                 settings.UploadBytesPerFrame < GreedyMesherJob.MaximumQuads * PackedQuad.Stride ||
-                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 2 || settings.UploadSlots > 8 || settings.RenderDistance < 32)
+                settings.FrameSlots < 2 || settings.FrameSlots > 5 || settings.SecondaryFrameSlots < 2 || settings.SecondaryFrameSlots > 5 || settings.UploadSlots < 2 || settings.UploadSlots > 8)
                 throw new InvalidOperationException("Invalid terrain resource budgets.");
             foreach (var definition in content.Materials)
             {
@@ -244,7 +249,7 @@ namespace DigBlocks.Client.Rendering
             if (data.Length == 0)
             {
                 Replace(slot, position, null);
-                occlusionGraph.SetNode((int)slot, position, connectivity, false);
+                if (!occlusionGraph.SetNode(position, connectivity, false)) ReportAliasedChunk(position);
                 return true;
             }
             int bytes = data.Length * PackedQuad.Stride;
@@ -281,7 +286,7 @@ namespace DigBlocks.Client.Rendering
             staging.Retained.Add(allocation);
             staging.Used += data.Length;
             Replace(slot, position, allocation);
-            occlusionGraph.SetNode((int)slot, position, connectivity, true);
+            if (!occlusionGraph.SetNode(position, connectivity, true)) ReportAliasedChunk(position);
             UploadedBytes += bytes; bytesThisFrame += bytes;
             return true;
         }
@@ -336,10 +341,23 @@ namespace DigBlocks.Client.Rendering
             CameraVisibleQuads = 0; CameraVisibleChunks = 0; GraphCulledChunks = 0;
         }
 
-        public void Remove(uint slot)
+        public void Remove(int3 position)
         {
-            Replace(slot, int3.zero, null);
-            occlusionGraph.RemoveNode((int)slot);
+            //the graph decides: if the slot holds a different chunk then this one was never admitted,
+            //and clearing the slot would retire the geometry of whoever is actually in it.
+            if (occlusionGraph.RemoveNode(position)) Replace((uint)grid.SlotOf(position), int3.zero, null);
+        }
+
+        //more chunks are resident than the view distance the slot grid was built from, so two of them
+        //want one slot. The graph stops culling rather than cull against a wrong world; say so once,
+        //because the cause is configuration and every later chunk would repeat it.
+        private bool reportedAliasing;
+        private void ReportAliasedChunk(int3 position)
+        {
+            if (reportedAliasing) return;
+            reportedAliasing = true;
+            Debug.LogWarning($"Terrain chunk {position} collided with another in slot {grid.SlotOf(position)}; "
+                + $"resident chunks exceed the {grid} the view distance allows. Occlusion culling is now off.");
         }
 
         public void SetGraphReady(bool ready) => occlusionGraph.SetReady(ready);
@@ -423,10 +441,12 @@ namespace DigBlocks.Client.Rendering
                 command.Clear();
                 command.SetComputeBufferParam(settings.Compute, cullKernel, "_Geometry", geometry);
                 command.SetComputeBufferParam(settings.Compute, cullKernel, "_Chunks", frame.Chunks);
-                command.SetComputeIntParam(settings.Compute, "_ChunkCount", settings.MaxChunks);
+                command.SetComputeIntParam(settings.Compute, "_ChunkCount", grid.Capacity);
                 command.SetComputeVectorArrayParam(settings.Compute, "_Planes", planeVectors);
                 command.SetComputeVectorParam(settings.Compute, "_CameraPosition", camera.transform.position);
-                command.SetComputeFloatParam(settings.Compute, "_RangeSquared", settings.RenderDistance * settings.RenderDistance);
+                //the outermost streamed chunk's far face: past it there is nothing to draw.
+                float range = (grid.HorizontalRadius + 1) * ChunkLayout.Edge;
+                command.SetComputeFloatParam(settings.Compute, "_RangeSquared", range * range);
                 for (int i = 0; i < frame.Batches.Length; i++)
                 {
                     var batch = frame.Batches[i];
@@ -434,7 +454,7 @@ namespace DigBlocks.Client.Rendering
                     command.SetComputeBufferParam(settings.Compute, cullKernel, "_Visible", batch.Visible);
                     command.SetComputeIntParam(settings.Compute, "_Material", i / 2);
                     command.SetComputeIntParam(settings.Compute, "_ShadowOnly", i % 2);
-                    if (i % 2 == 0 || settings.CastShadows) command.DispatchCompute(settings.Compute, cullKernel, settings.MaxChunks, 1, 1);
+                    if (i % 2 == 0 || settings.CastShadows) command.DispatchCompute(settings.Compute, cullKernel, grid.Capacity, 1, 1);
                     command.CopyCounterValue(batch.Visible, batch.Args, 4);
                 }
                 Graphics.ExecuteCommandBuffer(command);
@@ -479,7 +499,7 @@ namespace DigBlocks.Client.Rendering
             var slot = new CameraSlot { Camera = camera, Frames = new Frame[settings.SecondaryFrameSlots] };
             try
             {
-                for (int i = 0; i < slot.Frames.Length; i++) slot.Frames[i] = new Frame(settings.MaxChunks, settings.QuadCapacity, materials.Length);
+                for (int i = 0; i < slot.Frames.Length; i++) slot.Frames[i] = new Frame(grid.Capacity, settings.QuadCapacity, materials.Length);
             }
             catch (Exception error)
             {

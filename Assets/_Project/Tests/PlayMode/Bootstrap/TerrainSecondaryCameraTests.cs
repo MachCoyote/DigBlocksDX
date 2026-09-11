@@ -27,8 +27,9 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             using var world = new World("Terrain secondary camera verification");
             var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(content.Registry);
             store.EnableReplicas();
-            using var renderer = new TerrainRenderer(content, settings);
-            using var scheduler = new ChunkMeshScheduler(content, settings, renderer);
+            var grid = new ChunkSlotGrid(12, 4);
+            using var renderer = new TerrainRenderer(content, settings, grid);
+            using var scheduler = new ChunkMeshScheduler(content, settings, renderer, grid);
 
             //unlit albedo makes "geometry reached this camera" a colour test rather than a lighting test
             Shader.SetGlobalFloat(FullbrightId, 1f);

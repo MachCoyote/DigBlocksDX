@@ -21,13 +21,11 @@ MonoBehaviour:
   - Key: digblocks:grass
     Color: {r: 0.55, g: 0.8, b: 0.3, a: 1}
   MeshWorkers: 8
-  MaxChunks: 4096
   QuadCapacity: 2097152
   UploadBytesPerFrame: 4194304
   UploadSlots: 3
   FrameSlots: 3
   SecondaryFrameSlots: 2
-  RenderDistance: 512
   VisualSeed: 1663821211
   ChunkOcclusionCulling: 1
   CastShadows: 1

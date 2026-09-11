@@ -21,8 +21,9 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             using var world = new World("Terrain scheduler verification");
             var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(content.Registry);
             store.EnableReplicas();
-            using var renderer = new TerrainRenderer(content, settings);
-            using var scheduler = new ChunkMeshScheduler(content, settings, renderer);
+            var grid = new ChunkSlotGrid(12, 4);
+            using var renderer = new TerrainRenderer(content, settings, grid);
+            using var scheduler = new ChunkMeshScheduler(content, settings, renderer, grid);
             var center = new ChunkAddress(1, int3.zero);
             var east = new ChunkAddress(1, new int3(1, 0, 0));
             uint stone = content.Registry.LookupSolid("digblocks:stone");
@@ -75,8 +76,9 @@ namespace DigBlocks.Bootstrap.PlayModeTests
             using var world = new World("Terrain occlusion verification");
             var store = world.GetOrCreateSystemManaged<ChunkWorldSystem>().Configure(content.Registry);
             store.EnableReplicas();
-            using var renderer = new TerrainRenderer(content, settings);
-            using var scheduler = new ChunkMeshScheduler(content, settings, renderer);
+            var grid = new ChunkSlotGrid(12, 4);
+            using var renderer = new TerrainRenderer(content, settings, grid);
+            using var scheduler = new ChunkMeshScheduler(content, settings, renderer, grid);
             var anchor = new ChunkAddress(1, int3.zero);
             //radius 2 so the empty chunks flanking the camera are resident: the graph walks face
             //neighbours, and a radius-1 cylinder has no column diagonally adjacent to the camera's.

@@ -257,7 +257,8 @@ namespace DigBlocks.Bootstrap
                     presentation?.DebugOptions?.IsEnabled(DebugToggleIds.DirectChunkDelivery) ?? false;
             if (client != null && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
                 services.Add(new TerrainRenderService(() => client.World, content, Resources.Load<TerrainRenderSettings>("TerrainRenderSettings"),
-                    () => presentation?.GameplayInputAvailable ?? false, presentation?.DebugOptions,
+                    () => presentation?.GameplayInputAvailable ?? false,
+                    streamingOptions.HorizontalRadius, streamingOptions.VerticalRadius, presentation?.DebugOptions,
                     companion == null ? null : companion.RequestClientInterest, companion?.WorldId ?? 1));
             return services;
         }
