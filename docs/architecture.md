@@ -84,6 +84,7 @@ transport-specific implementation.
 | NetCode RPC, transport, or world wiring | `Scripts/Networking/NetCode` and its PlayMode tests |
 | Client/server world ownership | `Scripts/Client/Runtime` or `Scripts/Server/Runtime` |
 | Menus, navigation, focus, or UI root | `Scripts/Client/UI`, then `docs/ui-menu-foundation.md` |
+| Mobs, items, ghosts, entity content, or block entities | `docs/entity-foundation.md`, then `Scripts/Simulation` and `Scripts/Networking/NetCode/Ghosts` |
 | Debug menu, debug toggles, or the terrain debug views | `Scripts/Client/Debugging`, `Scripts/Core/Diagnostics`, then `docs/debug-menu-implementation.md` |
 | Chunk slot capacity, render distance, or residency limits | `docs/terrain-chunk-capacity.md` and `docs/terrain-chunk-slot-addressing-summary.md`, then `Scripts/Voxels/ChunkSlotGrid.cs` and `Scripts/Networking/NetCode/Bulk/ChunkStreamingSettings.cs` |
 | Terrain missing from the Scene view or another viewport | `Scripts/Client/Rendering/TerrainCameraSet.cs`, then `docs/terrain-secondary-camera-summary.md` |
@@ -162,6 +163,10 @@ session is never assumed to exist while a menu is on screen.
 Dynamic objects such as players, mobs, dropped items, and projectiles are ECS
 entities. Networked instances use ghosts where ordinary replication is a good
 fit.
+
+The approved [entity foundation](entity-foundation.md) records the entity type
+registry, code-built ghost prefabs, chunk-interest relevancy, entity chunk
+residency and the presentation seam. It is design only; nothing is implemented yet.
 
 The locally controlled player can use owner prediction and rollback. Ordinary
 mobs should normally be interpolated and server-authoritative. Prediction is
