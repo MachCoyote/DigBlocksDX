@@ -77,6 +77,17 @@ namespace DigBlocks.Simulation
             return true;
         }
 
+        /// <summary>Chunks currently holding something. Diagnostics and tests.</summary>
+        public IReadOnlyCollection<ChunkAddress> StoredChunks => chunks.Keys;
+
+        /// <summary>What a chunk holds, without taking ownership of it. Diagnostics and tests.</summary>
+        public bool TryPeek(ChunkAddress address, out IReadOnlyList<StoredEntity> entities)
+        {
+            bool found = chunks.TryGetValue(address, out var list);
+            entities = found ? list : Array.Empty<StoredEntity>();
+            return found;
+        }
+
         public void Clear() => chunks.Clear();
     }
 }

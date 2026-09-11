@@ -26,7 +26,7 @@ namespace DigBlocks.Simulation
     }
 
     [WorldSystemFilter(WorldSystemFilterFlags.ServerSimulation)]
-    [UpdateInGroup(typeof(SimulationSystemGroup))]
+    [UpdateInGroup(typeof(EntityBehaviorSystemGroup))]
     [BurstCompile]
     public partial struct CircleFlightSystem : ISystem
     {

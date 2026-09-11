@@ -432,6 +432,12 @@ Entities follow the chunks:
 - `ChunkResidencySystem`, Burst and server-side, writes `ChunkResidency` from
   `WorldPosition`, skipping the write when the chunk has not changed so a
   stationary mob costs nothing downstream.
+- It runs after `EntityBehaviorSystemGroup`, which holds everything that moves an
+  entity of its own accord. Residency has to be derived from where an entity is,
+  not where it was, because it decides three separate things that all go wrong the
+  same way when it is a tick stale: which chunk an entity is saved with, which
+  chunk brings it back, and which peers its ghost is relevant to. A new behaviour
+  joins the group and inherits the guarantee rather than having to know about it.
 - Spawning sets `ChunkResidency` itself rather than waiting for that system. An
   entity with a default residency reads as being in world zero, which no interest
   covers, and would be swept into the chunk store before it ever ticked.
@@ -665,9 +671,9 @@ Each step is independently verifiable, and each leaves the project working.
   precedent for declaring replication for a component whose assembly knows
   nothing about netcode.
 
-### Two bugs the tests did not have
+### Bugs the tests did not have
 
-Both surfaced only when the game was actually run, and both were in code paths the
+Each surfaced only when the game was actually run, and each was in a code path the
 tests reached a different way. Recorded because the shape of the gap is the lesson.
 
 **A `DefaultVariantSystemBase` must not advertise itself to the default world.**
@@ -699,6 +705,29 @@ Meshes and materials are now registered with `EntitiesGraphicsSystem` and
 referenced by batch id, which has no such lifetime and lasts as long as the
 backend does. The gap in coverage was that every presentation test attached to
 entities that were never destroyed.
+
+**Residency derived before movement files an entity in the wrong chunk.** Unity
+sorted `ChunkResidencySystem` before `CircleFlightSystem` and
+`ServerEntityResidencySystem` after both, so residency was computed from the
+position at the start of a tick and consumed after the entity had moved. Two
+things followed. A mob that had just moved into the simulated volume still read as
+outside it and was put away while standing inside, which with a stationary player
+is permanent, because nothing reconsiders a stored entity until interest changes.
+And the record was filed under the chunk the mob was in a tick ago while holding
+the position it is at now, so the chunk that would bring it back was not the chunk
+holding it, and walking back to where the mobs were spawned did not return all of
+them. Both are intermittent by nature: they need the mob to be within one tick's
+travel of a chunk boundary at the moment it is judged, and server tick batching,
+which this project does hit, widens that window to a whole batch of movement.
+
+The ordering is now stated rather than inherited from the sort: behaviours live in
+`EntityBehaviorSystemGroup` and residency updates after it. The regression tests
+are in `EntityResidencyWalkTests` and assert the invariant rather than the
+ordering — that a moving mob is filed under the chunk it is in, and that every
+stored record sits in the chunk it is filed under. Both fail against the old
+order. The coverage gap was that every previous residency test moved interest in a
+single jump with one entity standing still, which is the one shape that cannot
+expose a stale address: a stationary entity's last chunk is also its current one.
 
 ### Dead ends worth not repeating
 

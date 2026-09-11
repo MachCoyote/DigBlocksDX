@@ -16,6 +16,10 @@ namespace DigBlocks.Simulation
     /// </summary>
     [WorldSystemFilter(WorldSystemFilterFlags.ServerSimulation)]
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    //after everything that moves an entity, so residency names the chunk an entity is in rather than
+    //the one it was in. Residency decides which chunk an entity is filed under when it is put away,
+    //and so which chunk brings it back; a stale one files it somewhere the player has to walk to.
+    [UpdateAfter(typeof(EntityBehaviorSystemGroup))]
     [BurstCompile]
     public partial struct ChunkResidencySystem : ISystem
     {
