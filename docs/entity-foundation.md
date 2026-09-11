@@ -335,12 +335,12 @@ would have cost the same, and it happens on spawn rather than per frame, so at
 mob counts it is free. If entity spawn rates ever reach thousands per frame —
 dense item drops, particles — revisit with a batched attach.
 
-This seam is also insurance. Entities Graphics running inside a NetCode client
-world, which is created by `ClientServerBootstrap.CreateClientWorld` rather than
-as the default world, is the one assumption in this design that has not been
-verified against a running editor. It should hold, because NetCode client worlds
-carry `WorldSystemFilterFlags.Presentation`, but it is checked early, and the
-fallback backend is already designed if it does not.
+That assumption is now settled rather than assumed.
+`EntitiesGraphicsInNetCodeWorldTests` creates a client world through
+`ClientServerBootstrap.CreateClientWorld`, asserts `EntitiesGraphicsSystem` is
+present in it rather than only in the default world, and checks that an attached
+entity comes away with the components Entities Graphics actually draws from. The
+seam remains the insurance if that ever stops being true.
 
 ## The in-game gate
 
