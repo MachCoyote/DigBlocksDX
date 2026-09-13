@@ -2,7 +2,7 @@
 
 ## Status
 
-This is the current approved project direction as of September 7, 2026.
+This is the current approved project direction as of September 12, 2026.
 
 ## Repository Map
 
@@ -171,9 +171,21 @@ Dynamic objects such as players, mobs, dropped items, and projectiles are ECS
 entities. Networked instances use ghosts where ordinary replication is a good
 fit.
 
-The approved [entity foundation](entity-foundation.md) records the entity type
-registry, code-built ghost prefabs, chunk-interest relevancy, entity chunk
-residency and the presentation seam. It is design only; nothing is implemented yet.
+[The entity foundation](entity-foundation.md) is implemented: a JSON entity
+content pipeline, code-built ghost prefabs, position replicated as quantized
+absolute block coordinates, chunk-interest ghost relevancy narrowed by a
+simulation distance, entity chunk residency with a behaviour-state round trip,
+and a presentation seam behind which the renderer is replaceable.
+[Entity definitions](entity-definitions.md) is the authoring reference, and
+[the implementation summary](entity-foundation-summary.md) records what was built
+and what deliberately was not.
+
+Two ordering rules hold that together, and both are stated rather than inherited
+from the system sort. Everything that moves an entity of its own accord lives in
+`EntityBehaviorSystemGroup`, and anything deriving something from a position —
+`ChunkResidencySystem`, `ServerPositionPublishSystem` — updates after it. A stale
+derivation is not a visible error: it is an entity filed under a chunk it is not
+in, or a position on the wire that is a tick old.
 
 The locally controlled player can use owner prediction and rollback. Ordinary
 mobs should normally be interpolated and server-authoritative. Prediction is
@@ -271,7 +283,10 @@ ownership, failure handling and the next integration boundary.
 5. Add chunk interest, snapshot, delta, and transmission systems.
 6. Add client meshing and rendering.
 7. Add terrain generation: world types, layered shaping and deterministic seeds.
-7. Add dynamic entity simulation and ghost authoring incrementally.
+8. The dynamic entity foundation is implemented: entity content, ghost prefabs,
+   position replication, relevancy, chunk residency and presentation. See
+   [its implementation summary](entity-foundation-summary.md). The player entity,
+   entity collision and block entities build on it and are not done.
 
 This sequence deliberately establishes connection and world ownership before
 chunk transmission while keeping the chunk model reusable in tests, persistence,

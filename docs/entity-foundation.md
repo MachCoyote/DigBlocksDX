@@ -108,16 +108,20 @@ considerably more than the ceremony costs.
 
 Authored as JSON in `Assets/StreamingAssets/content/digblocks`, alongside block
 content, with the same additive archetype inheritance: every field except `key`
-is optional and resolves through the archetype chain, then engine defaults.
+is optional and resolves through the archetype chain, then engine defaults. The
+field-by-field reference is [entity definitions](entity-definitions.md); what
+follows is the shape and the reasoning.
 
 ```json
 {
   "key": "digblocks:debug_orbiter",
   "archetype": "digblocks:mob",
   "model": "digblocks:models/debug_cube",
+  "category": "marker",
   "width": 0.6,
   "height": 0.6,
-  "ghost": { "mode": "interpolated", "optimization": "dynamic", "importance": 1 },
+  "gravity": false,
+  "collides": false,
   "behaviors": [ "digblocks:circle_flight" ]
 }
 ```
