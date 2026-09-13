@@ -72,6 +72,10 @@ namespace DigBlocks.Networking.NetCode
     /// <summary>Publishes the authoritative position into its replicated form once per tick.</summary>
     [WorldSystemFilter(WorldSystemFilterFlags.ServerSimulation)]
     [UpdateInGroup(typeof(SimulationSystemGroup))]
+    //between the behaviours that move an entity and the send that carries the result, so what goes
+    //on the wire is where the entity is rather than where it was a tick ago. Nothing but this pins
+    //that: the sort is free to put an unconstrained system on either side of the behaviours.
+    [UpdateAfter(typeof(EntityBehaviorSystemGroup))]
     [UpdateBefore(typeof(GhostSendSystem))]
     [BurstCompile]
     public partial struct ServerPositionPublishSystem : ISystem

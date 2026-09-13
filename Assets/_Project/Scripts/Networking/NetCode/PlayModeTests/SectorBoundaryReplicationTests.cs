@@ -35,6 +35,55 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
                     EntityGhostMode.Interpolated, EntityGhostOptimization.Dynamic, 1))
         });
 
+        //What goes on the wire has to be where the entity is, not where it was. ServerPositionPublish
+        //System states that it runs before GhostSendSystem but says nothing about the behaviours that
+        //move an entity, so whether it publishes this tick's position or last tick's is decided by
+        //the sort rather than by anything written down.
+        [UnityTest]
+        public IEnumerator ThePublishedPositionIsWhereTheEntityIsNotWhereItWas() => UniTask.ToCoroutine(async () =>
+        {
+            var registry = Registry();
+            var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
+            var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
+            var session = new NetCodeSession(NetworkSessionRole.ClientAndServer,
+                new NetworkSessionOptions("127.0.0.1", 0, NetworkSessionOptions.CurrentProtocolVersion),
+                () => client.World, () => server.World, logger, () => 184);
+            var bulk = new ChunkCompanionService(session);
+            var ghosts = new EntityGhostService(session, registry, allowDebugSpawns: true);
+            await Host(server, client, session, bulk, ghosts).StartAsync(CancellationToken.None);
+            await Until(() => session.State == NetworkSessionState.InGame);
+
+            var prefabs = server.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+            await Until(() => prefabs.Built);
+
+            //fast enough that a tick of movement is far larger than the quantization step, so a stale
+            //publish is unmistakable rather than a rounding difference.
+            Assert.That(EntitySpawn.Spawn(server.World.EntityManager, prefabs, registry.GetId(Orbiter),
+                SectorGrid.FromBlocks(new int3(0, 96, 0)), radius: 120f, angularSpeed: 8f),
+                Is.Not.EqualTo(Entity.Null));
+
+            double worst = 0;
+            int samples = 0;
+            double deadline = Time.realtimeSinceStartupAsDouble + 4;
+            while (Time.realtimeSinceStartupAsDouble < deadline)
+            {
+                await UniTask.Yield();
+                using var query = server.World.EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<WorldPosition>(), ComponentType.ReadOnly<ReplicatedPosition>());
+                if (query.CalculateEntityCount() != 1) continue;
+                Entity mob = query.GetSingletonEntity();
+                var authoritative = SectorGrid.ToBlocks(server.World.EntityManager.GetComponentData<WorldPosition>(mob));
+                var published = server.World.EntityManager.GetComponentData<ReplicatedPosition>(mob).Blocks;
+                worst = math.max(worst, math.distance(authoritative, published));
+                samples++;
+            }
+
+            Assert.That(samples, Is.GreaterThan(60), "the mob should have been sampled while flying");
+            //one quantization step is the most the wire format itself can differ by.
+            Assert.That(worst, Is.LessThan(2.0 / ReplicatedPosition.Quantization),
+                $"the published position trailed the authoritative one by {worst:0.####} blocks, which is a tick of movement, not rounding");
+        });
+
         [UnityTest]
         public IEnumerator AGhostCrossingASectorBoundaryMovesContinuously() => UniTask.ToCoroutine(async () =>
         {

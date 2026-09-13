@@ -443,6 +443,10 @@ Entities follow the chunks:
   covers, and would be swept into the chunk store before it ever ticked.
 - When a chunk leaves the resident set, the entities in it are handed to
   `IEntityChunkStore.Store(address, entities)` and destroyed.
+- An empty union is an answer, not a missing one. With no peer interested in
+  anything, nothing is resident and everything is put away, so a server whose last
+  player leaves stops simulating rather than ticking every mob in the world for an
+  empty room.
 - When a chunk enters the resident set, `IEntityChunkStore.Load(address)`
   respawns them.
 
@@ -728,6 +732,38 @@ stored record sits in the chunk it is filed under. Both fail against the old
 order. The coverage gap was that every previous residency test moved interest in a
 single jump with one entity standing still, which is the one shape that cannot
 expose a stale address: a stationary entity's last chunk is also its current one.
+
+**The same stale-derivation shape was latent in the wire format.**
+`ServerPositionPublishSystem` declared only that it runs before `GhostSendSystem`,
+saying nothing about the behaviours that move an entity, so whether it published
+this tick's position or last tick's was decided by the sort. It happened to sort
+the right way, so nothing was visibly wrong — which is the only reason this one was
+found by review rather than by a player. It now states `[UpdateAfter(typeof(
+EntityBehaviorSystemGroup))]`, and `ThePublishedPositionIsWhereTheEntityIsNotWhere
+ItWas` pins it behaviourally: forced to the wrong side, the published position
+trails the authoritative one by a full orbit radius.
+
+The general lesson, having now hit it twice: anything that *derives* something from
+a position has to say where it sits relative to the things that change one.
+Inheriting that from the sort is not a decision, it is a coin toss that lands the
+same way until something else is added to the group.
+
+### Known gaps, deliberately left
+
+- `EntityFlags.Persists` is parsed from content and hashed into the registry
+  fingerprint, but nothing reads it: every entity is handed to the chunk store on
+  unload regardless. The shipped `debug_orbiter` declares `persists: false` and is
+  stored anyway. Harmless while the store is in memory and the only entity is a
+  debug mob, but it has to mean something before mobs spawn naturally — presumably
+  that a non-persistent entity is discarded on unload rather than saved.
+- `StoredEntity` names `CircleFlight` directly, so it is the only behaviour state
+  that survives an unload. A second stateful behaviour would lose its state
+  silently. The fix when there is a second one is a behaviour-state interface or a
+  serialized blob, not another field.
+- A just-spawned entity is irrelevant for the tick it spawns on, because
+  `GhostSendSystem` allocates ghost ids in its own update, after relevancy is
+  gathered. That is a tick of latency, not a lost ghost, and there is no earlier
+  point to ask from. Recorded so it is not investigated twice.
 
 ### Dead ends worth not repeating
 

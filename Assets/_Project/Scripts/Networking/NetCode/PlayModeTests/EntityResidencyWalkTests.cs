@@ -260,6 +260,74 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             }
         }
 
+        //Residency is the union of what peers are interested in, and an empty union should mean
+        //nothing is alive. A dedicated server whose last player leaves otherwise keeps ticking every
+        //mob in the world forever, with nobody to see any of it.
+        [UnityTest]
+        public IEnumerator MobsArePutAwayWhenTheLastPlayerLeaves() => UniTask.ToCoroutine(async () =>
+        {
+            var registry = Registry();
+            var serverRuntime = new ServerRuntime(NetCodeWorldFactory.CreateServerWorld);
+            var serverSession = new NetCodeSession(NetworkSessionRole.Server,
+                new NetworkSessionOptions("127.0.0.1", 0, NetworkSessionOptions.CurrentProtocolVersion, bindAddress: "127.0.0.1"),
+                null, () => serverRuntime.World, logger);
+            var serverBulk = new ChunkCompanionService(serverSession, 0);
+            var store = new InMemoryEntityChunkStore();
+            var serverGhosts = new EntityGhostService(serverSession, registry, serverBulk, chunkStore: store);
+            await Host(serverRuntime, serverSession, serverBulk, serverGhosts).StartAsync(CancellationToken.None);
+
+            var clientRuntime = new ClientRuntime(NetCodeWorldFactory.CreateClientWorld);
+            var clientSession = new NetCodeSession(NetworkSessionRole.Client,
+                new NetworkSessionOptions("127.0.0.1", serverSession.ListeningPort, NetworkSessionOptions.CurrentProtocolVersion),
+                () => clientRuntime.World, null, logger, () => 204);
+            var clientBulk = new ChunkCompanionService(clientSession);
+            var clientHost = Host(clientRuntime, clientSession, clientBulk,
+                new EntityGhostService(clientSession, registry, clientBulk));
+            await clientHost.StartAsync(CancellationToken.None);
+            await Until(() => clientSession.State == NetworkSessionState.InGame, "the client never got in game");
+            await Until(() => serverBulk.BoundPeerCount == 1, "the client never bound to the chunk channel");
+
+            var prefabs = serverRuntime.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+            await Until(() => prefabs.Built);
+            EntitySpawn.Spawn(serverRuntime.World.EntityManager, prefabs, prefabs.Registry.GetId(Orbiter),
+                SectorGrid.FromBlocks(new int3(4, 20, 4)), radius: 4f, angularSpeed: 1f);
+            await Until(() => ServerEntityCount(serverRuntime.World) == 1, "the mob never came alive");
+
+            //the only player leaves, so nothing is interested in anything any more.
+            await clientHost.StopAsync(CancellationToken.None);
+            await Until(() => serverBulk.BoundPeerCount == 0, "the peer never went away");
+
+            await Until(() => ServerEntityCount(serverRuntime.World) == 0,
+                "the mob is still being simulated with nobody connected");
+            Assert.That(store.StoredEntityCount, Is.EqualTo(1L),
+                "the mob should have been handed to the chunk store rather than left ticking");
+        });
+
+        //Quitting to the menu and loading again is a thing a player does constantly, and it is the
+        //boundary where everything the entity foundation builds per session is torn down and rebuilt:
+        //ghost prefabs, the chunk store, the presentation backend's meshes, the variant registration.
+        //The two bugs here that survived longest were both something outliving what owned it.
+        [UnityTest]
+        public IEnumerator ASecondSessionInTheSameProcessStillSpawnsAndReplicates() => UniTask.ToCoroutine(async () =>
+        {
+            for (int session = 0; session < 2; session++)
+            {
+                var context = await StartSession(205 + (ulong)session);
+                var prefabs = context.Server.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+                await Until(() => prefabs.Built, $"session {session} never built its ghost prefabs");
+
+                EntitySpawn.Spawn(context.Server.World.EntityManager, prefabs, prefabs.Registry.GetId(Orbiter),
+                    SectorGrid.FromBlocks(new int3(6, 40, 6)), radius: 6f, angularSpeed: 1.2f);
+                await Until(() => ServerEntityCount(context.Server.World) == 1, $"session {session} never spawned");
+                await Until(() => ClientGhostCount(context.Client.World) == 1, $"session {session} never replicated");
+
+                //tear the session down the way the game does, before the next one starts.
+                for (int i = hosts.Count - 1; i >= 0; i--) await hosts[i].StopAsync(CancellationToken.None);
+                hosts.Clear();
+                await Frames(4);
+            }
+        });
+
         private static UniTask MoveAnchorTo(SessionContext context, int x) => MoveAnchorTo(context, x, 0, frames: 4);
 
         private static async UniTask MoveAnchorTo(SessionContext context, int x, int z, int frames)
@@ -322,11 +390,13 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         private static async UniTask Frames(int count)
         { for (int i = 0; i < count; i++) await UniTask.Yield(); }
 
-        private static async UniTask Until(Func<bool> condition)
+        private static UniTask Until(Func<bool> condition) => Until(condition, "condition was never met");
+
+        private static async UniTask Until(Func<bool> condition, string because)
         {
             double deadline = Time.realtimeSinceStartupAsDouble + 15;
             while (!condition() && Time.realtimeSinceStartupAsDouble < deadline) await UniTask.Yield();
-            Assert.That(condition(), Is.True);
+            Assert.That(condition(), Is.True, because);
         }
 
         [UnityTearDown]

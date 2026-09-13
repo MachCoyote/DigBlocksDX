@@ -64,12 +64,13 @@ namespace DigBlocks.Networking.NetCode
             if (prefabs is not { Built: true }) return;
 
             readInterests(interests);
-            //no peer has declared interest yet, so there is no opinion about what should be alive.
-            //Unloading everything here would put away entities the moment they spawn.
-            if (interests.Count == 0) return;
 
             //a cheap signature over peer and epoch: interest only changes by advancing an epoch, so
-            //this catches every change without comparing thousands of addresses.
+            //this catches every change without comparing thousands of addresses. No peers hashes to
+            //zero, which is the right answer rather than a missing one: with nobody interested in
+            //anything, nothing should be alive, and losing the last peer is a change like any other.
+            //A server that treated it as "no opinion yet" would tick every mob in the world forever
+            //with nobody connected to see any of it.
             ulong next = 0;
             foreach (var peer in interests) next = unchecked(next * 31 + peer.PeerId * 1000003 + peer.Interest.Epoch);
             if (next != signature)

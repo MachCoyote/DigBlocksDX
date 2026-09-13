@@ -84,6 +84,10 @@ namespace DigBlocks.Networking.NetCode
                         Math.Min(distance.Horizontal, interest.HorizontalRadius),
                         Math.Min(distance.Vertical, interest.VerticalRadius), address)) continue;
                     if (!networkIdByPeer.TryGetValue(interests[i].PeerId, out int networkId)) continue;
+                    //a just-spawned entity still has a ghost id of zero: GhostSendSystem allocates
+                    //ids in its own update, after this one. It is therefore irrelevant for the tick
+                    //it spawns on and sent from the next, which is a tick of latency rather than a
+                    //lost ghost, and there is no earlier point to ask from.
                     set.TryAdd(new RelevantGhostForConnection(networkId, ghost.ValueRO.ghostId), 1);
                     pairs++;
                 }
