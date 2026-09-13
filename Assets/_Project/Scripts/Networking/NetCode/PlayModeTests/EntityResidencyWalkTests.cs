@@ -31,6 +31,20 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
         private const int StreamRadius = 3;
         private const int SimulateRadius = 2;
 
+        private const string Mayfly = "digblocks:mayfly";
+
+        //two types that differ only in whether they persist, which is the whole of what is under test.
+        private static EntityTypeRegistry RegistryWithAFleetingType() => new EntityTypeRegistry(new[]
+        {
+            Definition(Orbiter, EntityFlags.Persists),
+            Definition(Mayfly, EntityFlags.None)
+        });
+
+        private static EntityTypeDefinition Definition(string key, EntityFlags flags) =>
+            new EntityTypeDefinition(key, "digblocks:models/cube", new[] { SimulationBehaviors.CircleFlight },
+                new EntityTypeAttributes(flags, EntityCategory.Marker, 0.6f, 0.6f,
+                    EntityGhostMode.Interpolated, EntityGhostOptimization.Dynamic, 1));
+
         private static EntityTypeRegistry Registry() => new EntityTypeRegistry(new[]
         {
             new EntityTypeDefinition(Orbiter, "digblocks:models/cube",
@@ -328,6 +342,66 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             }
         });
 
+        //Persists means saved with its chunk and restored when that chunk loads again, so a type
+        //without it is finished when its chunk leaves rather than filed away. A world that kept every
+        //wandering mob and dropped item it ever produced would grow without bound.
+        [UnityTest]
+        public IEnumerator ATypeThatDoesNotPersistIsDiscardedRatherThanStored() => UniTask.ToCoroutine(async () =>
+        {
+            var context = await StartSession(207, RegistryWithAFleetingType());
+            var server = context.Server;
+            var prefabs = server.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+            await Until(() => prefabs.Built, "the ghost prefabs were never built");
+
+            var home = SectorGrid.FromBlocks(new int3(8, 40, 8));
+            EntitySpawn.Spawn(server.World.EntityManager, prefabs, prefabs.Registry.GetId(Orbiter), home, radius: 4f, angularSpeed: 1f);
+            EntitySpawn.Spawn(server.World.EntityManager, prefabs, prefabs.Registry.GetId(Mayfly), home, radius: 4f, angularSpeed: 1f);
+            await Until(() => ServerEntityCount(server.World) == 2, "both mobs should have come alive");
+
+            //walk away until neither is simulated any more.
+            for (int x = 1; x <= 8; x++) await MoveAnchorTo(context, x, 0, frames: 2);
+            await Until(() => ServerEntityCount(server.World) == 0, "both mobs should have left the simulated set");
+
+            Assert.That(context.Store.StoredEntityCount, Is.EqualTo(1L),
+                "only the persisting type should have been handed to the chunk store");
+
+            //and walking back brings back exactly the one that was saved.
+            for (int x = 7; x >= 0; x--) await MoveAnchorTo(context, x, 0, frames: 2);
+            await Until(() => ServerEntityCount(server.World) == 1, "the persisting mob should have come back");
+            Entity survivor = server.World.EntityManager.CreateEntityQuery(
+                ComponentType.ReadOnly<EntityTypeId>(), ComponentType.ReadOnly<ChunkResidency>()).GetSingletonEntity();
+            Assert.That(server.World.EntityManager.GetComponentData<EntityTypeId>(survivor).Value,
+                Is.EqualTo(prefabs.Registry.GetId(Orbiter)), "the survivor should be the persisting type");
+        });
+
+        //A spawned mob is irrelevant for the tick it spawns on, because ghost ids are allocated in
+        //GhostSendSystem's own update after relevancy is gathered. That is a tick, and this pins it:
+        //anything that turned relevancy into a slower or one-way gate would show up here as a mob
+        //that takes a visible moment to appear, or never appears at all.
+        [UnityTest]
+        public IEnumerator ASpawnedMobReachesTheClientPromptly() => UniTask.ToCoroutine(async () =>
+        {
+            var context = await StartSession(208);
+            var prefabs = context.Server.World.GetExistingSystemManaged<EntityGhostPrefabSystem>();
+            await Until(() => prefabs.Built, "the ghost prefabs were never built");
+            await MoveAnchorTo(context, 0, 0, frames: 2);
+
+            ushort type = prefabs.Registry.GetId(Orbiter);
+            for (int round = 0; round < 3; round++)
+            {
+                EntitySpawn.Spawn(context.Server.World.EntityManager, prefabs, type,
+                    SectorGrid.FromBlocks(new int3(8 + round, 40, 8)), radius: 4f, angularSpeed: 1f);
+
+                int expected = round + 1;
+                double started = Time.realtimeSinceStartupAsDouble;
+                while (ClientGhostCount(context.Client.World) < expected &&
+                       Time.realtimeSinceStartupAsDouble - started < 1.0) await UniTask.Yield();
+
+                Assert.That(ClientGhostCount(context.Client.World), Is.EqualTo(expected),
+                    $"spawn {round} did not reach the client within a second; relevancy costs a tick, not longer");
+            }
+        });
+
         private static UniTask MoveAnchorTo(SessionContext context, int x) => MoveAnchorTo(context, x, 0, frames: 4);
 
         private static async UniTask MoveAnchorTo(SessionContext context, int x, int z, int frames)
@@ -350,9 +424,10 @@ namespace DigBlocks.Networking.NetCode.PlayModeTests
             { Session = session; Bulk = bulk; Store = store; Server = server; Client = client; }
         }
 
-        private async UniTask<SessionContext> StartSession(ulong identity)
+        private UniTask<SessionContext> StartSession(ulong identity) => StartSession(identity, Registry());
+
+        private async UniTask<SessionContext> StartSession(ulong identity, EntityTypeRegistry registry)
         {
-            var registry = Registry();
             var server = new ServerRuntime(() => NetCodeWorldFactory.CreateServerWorld(true));
             var client = new ClientRuntime(() => NetCodeWorldFactory.CreateClientWorld(true));
             var session = new NetCodeSession(NetworkSessionRole.ClientAndServer,

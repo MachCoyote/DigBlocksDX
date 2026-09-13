@@ -39,6 +39,7 @@ namespace DigBlocks.Networking.NetCode
         private Action<List<ChunkStreamingServer.PeerInterest>> readInterests;
         private EntityGhostPrefabSystem prefabs;
         private EntitySimulationDistance distance;
+        private EntityStateCodecs codecs;
         private ulong signature;
         private bool configured;
 
@@ -48,11 +49,12 @@ namespace DigBlocks.Networking.NetCode
         protected override void OnCreate() => Enabled = false;
 
         internal void Configure(IEntityChunkStore entityStore, Action<List<ChunkStreamingServer.PeerInterest>> interestReader,
-            EntitySimulationDistance simulationDistance)
+            EntitySimulationDistance simulationDistance, EntityStateCodecs stateCodecs = null)
         {
             store = entityStore ?? throw new ArgumentNullException(nameof(entityStore));
             readInterests = interestReader ?? throw new ArgumentNullException(nameof(interestReader));
             distance = simulationDistance;
+            codecs = stateCodecs ?? EntityStateCodecs.Default;
             configured = true;
             Enabled = true;
         }
@@ -109,12 +111,15 @@ namespace DigBlocks.Networking.NetCode
             {
                 var address = residency.ValueRO.Address;
                 if (resident.Contains(address)) continue;
-
-                var flight = EntityManager.HasComponent<CircleFlight>(entity)
-                    ? EntityManager.GetComponentData<CircleFlight>(entity) : default;
-                if (!byChunk.TryGetValue(address, out var list)) byChunk.Add(address, list = new List<StoredEntity>());
-                list.Add(new StoredEntity(type.ValueRO.Value, position.ValueRO, flight));
                 commands.DestroyEntity(entity);
+
+                //a type that does not persist is not saved with its chunk, so unloading is the end of
+                //it rather than a round trip. That is what stops a world filling up with every
+                //wandering mob and dropped item it has ever produced.
+                if (!prefabs.Registry[type.ValueRO.Value].Attributes.Has(EntityFlags.Persists)) continue;
+
+                if (!byChunk.TryGetValue(address, out var list)) byChunk.Add(address, list = new List<StoredEntity>());
+                list.Add(new StoredEntity(type.ValueRO.Value, position.ValueRO, codecs.Capture(EntityManager, entity)));
             }
             commands.Playback(EntityManager);
 
@@ -138,8 +143,7 @@ namespace DigBlocks.Networking.NetCode
             if (entity == Entity.Null) return;
             //restore behaviour state rather than restarting it, so a reloaded mob resumes its circle
             //where it left off instead of snapping to a fresh phase.
-            if (stored.HasFlight && EntityManager.HasComponent<CircleFlight>(entity))
-                EntityManager.SetComponentData(entity, stored.Flight);
+            codecs.Restore(EntityManager, entity, stored.State);
         }
 
         /// <summary>Forces the next update to rebuild, for tests that move interest directly.</summary>

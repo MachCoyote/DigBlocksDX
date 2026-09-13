@@ -748,22 +748,47 @@ a position has to say where it sits relative to the things that change one.
 Inheriting that from the sort is not a decision, it is a coin toss that lands the
 same way until something else is added to the group.
 
-### Known gaps, deliberately left
+### Persistence and behaviour state
 
-- `EntityFlags.Persists` is parsed from content and hashed into the registry
-  fingerprint, but nothing reads it: every entity is handed to the chunk store on
-  unload regardless. The shipped `debug_orbiter` declares `persists: false` and is
-  stored anyway. Harmless while the store is in memory and the only entity is a
-  debug mob, but it has to mean something before mobs spawn naturally — presumably
-  that a non-persistent entity is discarded on unload rather than saved.
-- `StoredEntity` names `CircleFlight` directly, so it is the only behaviour state
-  that survives an unload. A second stateful behaviour would lose its state
-  silently. The fix when there is a second one is a behaviour-state interface or a
-  serialized blob, not another field.
-- A just-spawned entity is irrelevant for the tick it spawns on, because
-  `GhostSendSystem` allocates ghost ids in its own update, after relevancy is
-  gathered. That is a tick of latency, not a lost ghost, and there is no earlier
-  point to ask from. Recorded so it is not investigated twice.
+`EntityFlags.Persists` means what it says on the flag: saved with its chunk and
+restored when that chunk loads again. A type without it is finished when its chunk
+leaves the simulated set rather than filed away, which is what stops a world
+accumulating every wandering mob and dropped item it has ever produced. The shipped
+`debug_orbiter` persists, because the use of a debug mob is walking away and coming
+back to find it still flying.
+
+What survives that round trip is decided by `IEntityStateCodec`, one per stateful
+behaviour, registered in `EntityStateCodecs.Default` alongside the component it
+saves. The stored record carries behaviour key and bytes rather than named
+components, for two reasons. A chunk file has to hold bytes anyway, so the
+in-memory store and the disk store want the same record rather than two diverging
+ones. And naming the components in the record means every new stateful behaviour
+edits the record type and the residency system, with the failure mode for
+forgetting being state silently lost at the first chunk boundary — which is not a
+thing anyone would think to look for. Most behaviours need no codec at all, and an
+entity with no state captures nothing rather than an empty list.
+
+A record naming a behaviour this build does not implement, or whose length does not
+match the component, is skipped rather than reinterpreted: the entity comes back on
+the behaviour's own defaults.
+
+### The spawn tick, which cannot be reclaimed
+
+A just-spawned entity is irrelevant for the tick it spawns on. `GhostSendSystem`
+allocates ghost ids in its own update, after relevancy has been gathered, so on the
+tick an entity appears its `GhostInstance.ghostId` is still zero and there is no id
+to name it by. It is sent on the next tick.
+
+This is not fixable from outside NetCode, and the apparent fixes are worse. The
+per-chunk fast path that skips the relevancy map keys off the archetype
+(`GhostRelevancy.DefaultRelevancyQuery`), so using it for new spawns means a tag
+component, a structural change, and a mob briefly relevant to every connection in
+the world rather than the peers near it. Inverting to `SetIsIrrelevant` would make
+new ghosts relevant by default, at the cost of the set having to enumerate
+everything a peer *cannot* see, which is the performance property this whole
+section exists to get. A tick is cheaper than either.
+`ASpawnedMobReachesTheClientPromptly` pins it, so a change that turned relevancy
+into a slower or one-way gate fails rather than merely feeling sluggish.
 
 ### Dead ends worth not repeating
 

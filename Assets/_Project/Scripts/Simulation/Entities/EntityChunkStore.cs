@@ -13,15 +13,19 @@ namespace DigBlocks.Simulation
     {
         public readonly ushort TypeId;
         public readonly WorldPosition Position;
-        /// <summary>Circle state, for a type that flies one. Zero radius means it does not.</summary>
-        public readonly CircleFlight Flight;
 
-        public StoredEntity(ushort typeId, WorldPosition position, CircleFlight flight = default)
+        /// <summary>
+        /// Behaviour state, captured by whichever <see cref="IEntityStateCodec"/> claimed it. Null
+        /// when the type has none, which is most of them. Naming the components here instead would
+        /// mean every new stateful behaviour edits this type, and one whose author forgets loses its
+        /// state silently at the first chunk boundary.
+        /// </summary>
+        public readonly IReadOnlyList<EntityStateRecord> State;
+
+        public StoredEntity(ushort typeId, WorldPosition position, IReadOnlyList<EntityStateRecord> state = null)
         {
-            TypeId = typeId; Position = position; Flight = flight;
+            TypeId = typeId; Position = position; State = state;
         }
-
-        public bool HasFlight => Flight.Radius > 0f;
     }
 
     /// <summary>

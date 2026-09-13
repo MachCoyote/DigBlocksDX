@@ -30,13 +30,15 @@ namespace DigBlocks.Simulation.Tests
             var orbiter = registry[registry.GetId("digblocks:debug_orbiter")];
 
             //it inherits the mob archetype's replication policy but overrides everything physical:
-            //it is a marker that flies a fixed path, so it neither falls, collides, nor persists.
+            //it is a marker that flies a fixed path, so it neither falls nor collides. It does persist:
+            //the whole use of a debug mob is walking away and coming back to find it still flying,
+            //and a type that does not persist is discarded when its chunk leaves the simulated set.
             Assert.That(orbiter.Attributes.GhostMode, Is.EqualTo(EntityGhostMode.Interpolated));
             Assert.That(orbiter.Attributes.GhostOptimization, Is.EqualTo(EntityGhostOptimization.Dynamic));
             Assert.That(orbiter.Attributes.Category, Is.EqualTo(EntityCategory.Marker));
             Assert.That(orbiter.Attributes.Has(EntityFlags.Gravity), Is.False);
             Assert.That(orbiter.Attributes.Has(EntityFlags.Collides), Is.False);
-            Assert.That(orbiter.Attributes.Has(EntityFlags.Persists), Is.False);
+            Assert.That(orbiter.Attributes.Has(EntityFlags.Persists), Is.True);
             Assert.That(orbiter.Attributes.Width, Is.EqualTo(0.6f).Within(1e-4f));
             Assert.That(orbiter.Attributes.Height, Is.EqualTo(0.6f).Within(1e-4f));
             Assert.That(orbiter.Behaviors, Is.EqualTo(new[] { "digblocks:circle_flight" }));
